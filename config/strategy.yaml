@@ -1,0 +1,29 @@
+strategy:
+  name: xau_trend
+
+  ema_fast: 50
+  ema_slow: 200
+
+  atr:
+    period: 14
+    sl_multiplier: 2.0
+    rr_ratio: 2.5
+
+risk:
+  max_trades_per_day: 3
+  max_daily_loss: 0.02
+  max_open_positions: 1
+
+rotation:
+  enabled: true
+  frequency_days: 30
+  min_trades_required: 20
+  rollback_drawdown_pct: 0.05
+
+session:
+    allow_london: true
+    allow_newyork: true
+
+backtest:
+    period_days: 90
+    min_trades: 25
