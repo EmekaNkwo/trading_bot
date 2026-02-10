@@ -3,47 +3,35 @@ import time
 from portfolio.allocator import CapitalAllocator
 from portfolio.exposure import ExposureTracker
 from portfolio.config import PORTFOLIO
-
-from core.broker import MT5Broker
-from core.execution import MT5Executor
-from core.engine import TradingEngine
-from config.loader import load_config
-from strategy.xau_trend import XAUTrendStrategy
-
 from portfolio.guard import SymbolDrawdownGuard
 from portfolio.cooldown import SymbolCooldown
 from portfolio.state import PortfolioState
 
-from strategy.registry import STRATEGY_REGISTRY
+from core.broker import MT5Broker
+from core.execution import MT5Executor
+from core.engine import TradingEngine
 
+from config.loader import load_config
+from strategy.factory import build_strategy
+
+from utils.logger import setup_logger
 
 
 class PortfolioEngine:
 
     def __init__(self):
 
-        # -------------------------------
-        # CONFIG
-        # -------------------------------
+        self.logger = setup_logger()
         self.cfg = PORTFOLIO
 
+        # Shared portfolio components
         self.allocator = CapitalAllocator(self.cfg["max_total_risk"])
         self.exposure = ExposureTracker()
-
-        protection = self.cfg.get("protection", {})
-        self.drawdown_guard = SymbolDrawdownGuard(
-            max_drawdown_pct=protection.get("symbol_max_dd", 0.02)
-        )
-        self.cooldown = SymbolCooldown(
-            max_losses=protection.get("max_losses", 3),
-            cooldown_minutes=protection.get("cooldown_minutes", 1440),
-        )
-
+        self.drawdown_guard = SymbolDrawdownGuard(max_drawdown_pct=0.02)
+        self.cooldown = SymbolCooldown(max_losses=3)
         self.state = PortfolioState()
 
-        # -------------------------------
-        # SHARED BROKER CONNECTION
-        # -------------------------------
+        # Shared broker connection
         self.broker = MT5Broker()
         self.broker.connect()
 
@@ -51,82 +39,106 @@ class PortfolioEngine:
 
         config = load_config()
 
-        # -------------------------------
-        # BUILD SYMBOL ENGINES
-        # -------------------------------
-        for symbol, scfg in self.cfg["symbols"].items():
+        # --------------------------------------------------
+        # BUILD ONE ENGINE PER STRATEGY PER SYMBOL
+        # --------------------------------------------------
+        for symbol, symbol_cfg in self.cfg["symbols"].items():
 
-            strategy_name = scfg["strategy"]
-            strategy_cls = STRATEGY_REGISTRY.get(strategy_name)
+            # Handle both single strategy and multiple strategies config
+            if "strategies" in symbol_cfg:
+                strategies_cfg = symbol_cfg["strategies"]
+                for strategy_name, scfg in strategies_cfg.items():
+                    strategy = build_strategy(strategy_name, config)
+                    executor = MT5Executor(symbol=symbol)
 
-            if not strategy_cls:
-                raise ValueError(f"Unknown strategy: {strategy_name}")
+                    engine = TradingEngine(
+                        broker=self.broker,
+                        strategy=strategy,
+                        executor=executor,
+                        symbol=symbol,
+                        timeframe=scfg["timeframe"],
+                        candle_seconds=scfg["candle_seconds"]
+                    )
 
-            strategy = strategy_cls(config)
+                    self.engines.append({
+                        "engine": engine,
+                        "symbol": symbol,
+                        "strategy": strategy_name,
+                        "risk": scfg["risk"]
+                    })
+                    self.logger.info(f"Created engine: {symbol} - {strategy_name} (risk: {scfg['risk']})")
+            else:
+                # Single strategy per symbol
+                strategy_name = symbol_cfg["strategy"]
+                strategy = build_strategy(strategy_name, config)
+                executor = MT5Executor(symbol=symbol)
 
-            executor = MT5Executor(symbol=symbol)
+                engine = TradingEngine(
+                    broker=self.broker,
+                    strategy=strategy,
+                    executor=executor,
+                    symbol=symbol,
+                    timeframe=symbol_cfg["timeframe"],
+                    candle_seconds=symbol_cfg["candle_seconds"]
+                )
 
-            engine = TradingEngine(
-                broker=self.broker,
-                strategy=strategy,
-                executor=executor,
-                symbol=symbol,
-                timeframe=scfg["timeframe"],
-                candle_seconds=scfg.get("candle_seconds", 300),
-            )
+                self.engines.append({
+                    "engine": engine,
+                    "symbol": symbol,
+                    "strategy": strategy_name,
+                    "risk": symbol_cfg["risk"]
+                })
+                self.logger.info(f"Created engine: {symbol} - {strategy_name} (risk: {symbol_cfg['risk']})")
 
-            self.engines.append((engine, scfg))
+        self.logger.info(f"Portfolio initialized with {len(self.engines)} engines")
 
-    # -------------------------------------------------
+    # --------------------------------------------------
     # MAIN PORTFOLIO LOOP
-    # -------------------------------------------------
+    # --------------------------------------------------
 
     def run(self, allow_fn):
 
+        self.logger.info("PORTFOLIO LIVE MODE ACTIVE")
+
         while allow_fn():
 
-            open_risk = self.exposure.total_open_risk()
+            try:
+                open_risk = self.exposure.total_open_risk()
 
-            for engine, scfg in self.engines:
+                for item in self.engines:
 
-                symbol = engine.symbol
+                    engine = item["engine"]
+                    symbol = item["symbol"]
+                    strategy_name = item["strategy"]
+                    strategy_risk = item["risk"]
 
-                # -------------------------------
-                # SYMBOL SAFETY CHECKS
-                # -------------------------------
-                if not self.cooldown.allowed(symbol):
-                    continue
+                    # ------------------------------
+                    # Symbol drawdown protection
+                    # ------------------------------
+                    if not self.drawdown_guard.allowed(symbol):
+                        continue
 
-                if not self.drawdown_guard.allowed(symbol):
-                    continue
+                    if not self.cooldown.allowed(symbol):
+                        continue
 
-                # -------------------------------
-                # RISK ALLOCATION
-                # -------------------------------
-                alloc = self.allocator.allocate(
-                    scfg["risk"],
-                    open_risk
-                )
+                    # ------------------------------
+                    # Capital allocation
+                    # ------------------------------
+                    alloc = self.allocator.allocate(
+                        strategy_risk,
+                        open_risk
+                    )
 
-                if alloc <= 0:
-                    continue
+                    if alloc <= 0:
+                        continue
 
-                engine.executor.override_risk(alloc)
+                    # Tell executor the risk size
+                    engine.executor.override_risk(alloc)
 
-                # -------------------------------
-                # EXECUTE ONE CANDLE
-                # -------------------------------
-                engine.step_once()
+                    # Run ONE step of the engine
+                    engine.step_once()
 
-                # -------------------------------
-                # POST-TRADE FEEDBACK
-                # -------------------------------
-                pnl = engine.executor.last_trade_pnl
+                time.sleep(1)
 
-                if pnl is not None:
-                    self.state.record(symbol, pnl)
-                    self.drawdown_guard.update(symbol, pnl)
-                    self.cooldown.record_trade(symbol, pnl)
-
-            # prevent tight loop
-            time.sleep(1)
+            except Exception as e:
+                self.logger.exception(f"PORTFOLIO ERROR: {e}")

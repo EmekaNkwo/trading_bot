@@ -1,4 +1,4 @@
-from datetime import datetime, time, timezone
+from datetime import datetime, time, timezone as dt_timezone
 
 
 class SessionFilter:
@@ -11,38 +11,45 @@ class SessionFilter:
     ):
         self.london = london
         self.newyork = newyork
-        self.tz = timezone.utc if tz_name == "UTC" else timezone
+        self.tz = dt_timezone.utc   # always operate in UTC
 
+    # -------------------------------------------------
+    # ALWAYS RETURN TIMEZONE-AWARE UTC TIME
+    # -------------------------------------------------
     def now_utc(self):
-        return datetime.utcnow().time()
+        return datetime.now(self.tz)
 
     def in_london(self):
-        t = self.now_utc()
+        t = self.now_utc().time()
         return time(self.london[0]) <= t <= time(self.london[1])
 
     def in_newyork(self):
-        t = self.now_utc()
+        t = self.now_utc().time()
         return time(self.newyork[0]) <= t <= time(self.newyork[1])
 
+    # -------------------------------------------------
+    # BACKTEST SESSION CHECK
+    # -------------------------------------------------
     def _in_session(self, t):
-        """Check if time t is within any allowed trading session"""
         london_start = time(self.london[0])
         london_end = time(self.london[1])
         ny_start = time(self.newyork[0])
         ny_end = time(self.newyork[1])
-        
+
         return (london_start <= t <= london_end) or (ny_start <= t <= ny_end)
- 
+
+    # -------------------------------------------------
+    # MASTER ENTRY POINT
+    # -------------------------------------------------
     def allowed(self, candle_time=None):
+
+        # LIVE TRADING
         if candle_time is None:
-            # Live trading - use current UTC time
             return self.in_london() or self.in_newyork()
- 
-        # Backtesting - use candle timestamp
+
+        # BACKTEST / WALKFORWARD
         if candle_time.tzinfo is None:
-            # assume UTC if naive
-            t = candle_time.time()
-        else:
-            t = candle_time.astimezone(self.tz).time()
- 
+            candle_time = candle_time.replace(tzinfo=self.tz)
+
+        t = candle_time.astimezone(self.tz).time()
         return self._in_session(t)

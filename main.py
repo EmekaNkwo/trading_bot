@@ -25,6 +25,9 @@ from strategy.xau_trend import XAUTrendStrategy
 from config.loader import load_config
 
 from portfolio.engine import PortfolioEngine
+from utils.crash_handler import CrashHandler
+from utils.heartbeat import Heartbeat
+
 
 
 # ---------------------------------------------------
@@ -62,7 +65,18 @@ def run_backtest_module():
     notifier.send("BACKTEST MODE STARTED")
 
     config = load_config()
-    df = load_from_csv("XAUUSDm", "M15")
+    try:
+        df = load_from_csv("XAUUSDm", "M15")
+    except FileNotFoundError:
+        logger.warning("Historical data missing, fetching from MT5")
+        broker = MT5Broker()
+        df = broker.get_historical_data(
+            symbol="XAUUSDm",
+            timeframe="M15",
+            bars=5000
+        )
+        save_to_csv(df, "XAUUSDm", "M15")
+        broker.shutdown()
 
     strategy = XAUTrendStrategy(config)
     engine = BacktestEngine()
@@ -271,6 +285,11 @@ def main():
 
     risk = RiskManager()
     orchestrator = BotOrchestrator(risk)
+    heartbeat = Heartbeat(interval_minutes=30)
+
+    
+    crash_handler = CrashHandler()
+    crash_handler.setup_global_handler()
 
     last_mode = None
     last_backtest_day = None
@@ -278,6 +297,8 @@ def main():
     last_report_date = None
 
     while True:
+
+        heartbeat.tick()
 
         mode = orchestrator.decide_mode()
     

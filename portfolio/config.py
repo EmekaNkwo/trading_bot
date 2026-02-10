@@ -4,23 +4,20 @@ PORTFOLIO = {
 
     "symbols": {
         "XAUUSDm": {
-            "timeframe": "M15",
-
-            # portion of total risk allocated to this symbol
-            "risk": 0.01,
-
-            # strategy identifier
-            "strategy": "xau_trend",
-
-            # candle execution interval (seconds)
-            "candle_seconds": 900
+            "strategies": {
+                "xau_trend": {
+                    "timeframe": "M15",
+                    "candle_seconds": 900,
+                    "risk": 0.005
+                },
+                "xau_scalper": {
+                    "timeframe": "M5",
+                    "candle_seconds": 300,
+                    "risk": 0.005
+                }
+            }
         },
         
-        # "XAUUSDm": {
-        #     "timeframe": "M15",
-        #     "risk": 0.007,
-        #     "strategy": "xau_trend"
-        # },
         # "US30m": {
         #     "timeframe": "M5",
         #     "risk": 0.007,
