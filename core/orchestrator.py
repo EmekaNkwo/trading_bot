@@ -30,6 +30,25 @@ class BotOrchestrator:
         except Exception:
             return False
 
+    def _check_drawdown(self, max_drawdown_pct=0.10):
+        """Check if account drawdown exceeds threshold"""
+        account = mt5.account_info()
+        if not account:
+            return True  # Fail safe - block if no account info
+        
+        balance = account.balance
+        equity = account.equity
+        
+        if balance <= 0:
+            return True
+        
+        drawdown_pct = (balance - equity) / balance
+        
+        if drawdown_pct >= max_drawdown_pct:
+            return False  # Drawdown too high
+        
+        return True  # Drawdown acceptable
+
     # -------------------------------------------------
     # MODE PERMISSIONS
     # -------------------------------------------------
@@ -82,6 +101,9 @@ class BotOrchestrator:
             return "idle"
 
         if not self.mt5_connected():
+            return "idle"
+
+        if not self._check_drawdown(max_drawdown_pct=0.10):
             return "idle"
 
         # LIVE (PORTFOLIO)

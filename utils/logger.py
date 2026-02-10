@@ -2,6 +2,15 @@ import logging
 import os
 
 
+def log_separator(logger, title="", char="=", width=60):
+    """Add a visual separator line to logs for readability (ASCII-safe for Windows)"""
+    if title:
+        padding = (width - len(title) - 4) // 2
+        line = char * padding + f"  {title}  " + char * padding
+    else:
+        line = char * width
+    logger.info(line)
+
 def setup_logger(name="trading_bot"):
 
     os.makedirs("logs", exist_ok=True)

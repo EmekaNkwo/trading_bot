@@ -132,8 +132,8 @@ class PortfolioEngine:
                     if alloc <= 0:
                         continue
 
-                    # Tell executor the risk size
-                    engine.executor.override_risk(alloc)
+                    # Tell executor the risk size (with strategy for proper lot sizing)
+                    engine.executor.override_risk(alloc, strategy_name)
 
                     # Run ONE step of the engine
                     engine.step_once()

@@ -2,7 +2,7 @@ import time
 from core.risk import RiskManager
 from utils.telegram import TelegramNotifier
 from config.telegram import TOKEN, CHAT_ID
-from utils.logger import setup_logger
+from utils.logger import setup_logger, log_separator
 
 
 class TradingEngine:
@@ -65,14 +65,16 @@ class TradingEngine:
             return
 
         # ---------------- SIGNAL ----------------
+        strategy_name = signal.get("strategy", "unknown")
+        log_separator(self.logger, f"SIGNAL - {strategy_name.upper()}")
         self.logger.info(
-            f"SIGNAL | {self.symbol} | "
-            f"{signal['side'].upper()} | "
-            f"SL={signal['sl']} TP={signal['tp']}"
+            f"  Symbol: {self.symbol} | Side: {signal['side'].upper()}\n"
+            f"  SL: {signal['sl']} | TP: {signal['tp']}"
         )
+        log_separator(self.logger)
 
         self.notifier.send(
-            f"SIGNAL | {self.symbol} | "
+            f"SIGNAL | {self.symbol} | {strategy_name.upper()} | "
             f"{signal['side'].upper()} | "
             f"SL={signal['sl']} TP={signal['tp']}"
         )
@@ -87,18 +89,20 @@ class TradingEngine:
 
         # ---------------- EXECUTION ----------------
         result = self.executor.place_market_order(
-            signal=signal,
-            lot=self.executor.current_lot
+            signal=signal
         )
 
         if result:
             self.risk.record_trade()
+            log_separator(self.logger, "ORDER SUCCESS")
             self.logger.info(
-                f"ORDER SUCCESS | {self.symbol} | "
-                f"TICKET={result.order}"
+                f"  Symbol: {self.symbol}\n"
+                f"  Strategy: {strategy_name.upper()}\n"
+                f"  Ticket: {result.order}"
             )
+            log_separator(self.logger)
             self.notifier.send(
-                f"ORDER EXECUTED | {self.symbol} | "
+                f"ORDER EXECUTED | {self.symbol} | {strategy_name.upper()} | "
                 f"TICKET={result.order}"
             )
         else:

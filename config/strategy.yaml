@@ -5,7 +5,8 @@ strategy:
   atr:
     period: 14
     sl_multiplier: 2.0
-    rr_ratio: 2.5
+    tp_multiplier: 3.0  # Wider TP for trend (3x ATR for bigger moves)
+    rr_ratio: 1.5
 
 scalper:
   ema_period: 20
@@ -13,7 +14,7 @@ scalper:
   bb_std: 2.0
   atr_period: 14
   sl_atr: 1.5
-  tp_atr: 2.0
+  tp_atr: 1.5  # Tighter TP for scalper (1.5x ATR for quick profits)
   min_candles: 50
   max_spread_points: 30
   news_exclude_before: 15

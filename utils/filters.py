@@ -66,6 +66,11 @@ class NewsFilter:
             # Check if within exclusion window
             time_diff = abs(current_minutes - news_minutes)
             if time_diff <= self.exclude_before or time_diff <= self.exclude_after:
+                print(f"NEWS BLOCKED | Current: {current_time.hour:02d}:{current_time.minute:02d} | "
+                      f"News: {news_hour:02d}:{news_minute:02d} | "
+                      f"Diff: {time_diff} min | Window: ±{self.exclude_before}/{self.exclude_after} min")
                 return False
                 
+        print(f"NEWS ALLOWED | Current: {current_time.hour:02d}:{current_time.minute:02d} | "
+              f"No high-impact news within {self.exclude_before} min before/{self.exclude_after} min after")
         return True
