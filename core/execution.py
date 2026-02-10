@@ -180,11 +180,15 @@ class MT5Executor:
             return {"valid": False, "reason": f"Lot {lot} above maximum {max_lot}"}
         
         # Check margin requirements
+        tick = mt5.symbol_info_tick(self.symbol)
+        if not tick:
+            return {"valid": False, "reason": "No tick data for margin calc"}
+            
         margin_required = mt5.order_calc_margin(
-            symbol=self.symbol,
-            volume=lot,
-            type=mt5.ORDER_TYPE_BUY,
-            price=mt5.symbol_info_tick(self.symbol).ask
+            mt5.ORDER_TYPE_BUY,
+            self.symbol,
+            lot,
+            tick.ask
         )
         
         if margin_required is None:
@@ -237,6 +241,9 @@ class MT5Executor:
         If lot not provided, calculates it dynamically using the signal's SL.
         """
         
+        strategy_name = signal.get("strategy", "unknown")
+        self.logger.info(f"[EXECUTE START] {strategy_name} {signal['side']}")
+        
         tick = mt5.symbol_info_tick(self.symbol)
         if not tick:
             self.logger.error("NO TICK DATA")
@@ -278,15 +285,19 @@ class MT5Executor:
             )
 
         # Validate lot size before execution
+        self.logger.info(f"[EXECUTE] Validating lot: {lot}")
         validation_result = self._validate_lot_size(lot)
         if not validation_result["valid"]:
-            self.logger.error(f"LOT VALIDATION FAILED | {validation_result['reason']}")
+            self.logger.error(f"[EXECUTE BLOCKED] Lot validation failed: {validation_result['reason']}")
             return None
+        self.logger.info("[EXECUTE] Lot validation passed")
 
         # Check account protection levels
+        self.logger.info("[EXECUTE] Checking account protection...")
         if not self._check_account_protection():
-            self.logger.error("ACCOUNT PROTECTION BLOCKED | Trade execution prevented")
+            self.logger.error("[EXECUTE BLOCKED] Account protection prevented trade")
             return None
+        self.logger.info("[EXECUTE] Account protection passed")
 
         if signal["side"] == "buy":
             order_type = mt5.ORDER_TYPE_BUY
@@ -309,6 +320,7 @@ class MT5Executor:
         }
 
         result = mt5.order_send(request)
+        self.logger.info(f"[EXECUTE] Order send result: {result}")
 
         # ❌ FAILED ORDER
         if not result or result.retcode != mt5.TRADE_RETCODE_DONE:
