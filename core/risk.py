@@ -9,7 +9,7 @@ class RiskManager:
 
     def __init__(
         self,
-        max_trades_per_day=3,
+        max_trades_per_day=10,
         max_daily_loss=0.02,
         max_open_positions=1,
     ):

@@ -4,9 +4,14 @@ strategy:
   ema_slow: 200
   atr:
     period: 14
-    sl_multiplier: 2.0
-    tp_multiplier: 3.0  # Wider TP for trend (3x ATR for bigger moves)
+    sl_multiplier: 1.5
+    tp_multiplier: 2.0
     rr_ratio: 1.5
+  min_adx: 25
+  adx_period: 14
+  rsi_period: 14
+  rsi_buy_max: 60
+  rsi_sell_min: 40
 
 scalper:
   ema_period: 20
@@ -24,7 +29,7 @@ scalper:
   trailing_step: 0.5
 
 risk:
-  max_trades_per_day: 3
+  max_trades_per_day: 10
   max_daily_loss: 0.02
   max_open_positions: 1
 

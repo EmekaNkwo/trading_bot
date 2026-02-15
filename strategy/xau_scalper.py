@@ -133,8 +133,8 @@ class XAUScalper:
         # =================================================
         if price > ema.iloc[-1]:
 
-            # candle wicked below band but closed back inside
-            if last.low < lower_bb.iloc[-1] and last.close > lower_bb.iloc[-1]:
+            # candle touches or wicks below band but closed back inside
+            if last.low <= lower_bb.iloc[-1] and last.close >= lower_bb.iloc[-1]:
 
                 # News filter check right before signal generation
                 if not self.news_filter.allowed(df.index[-1]):
@@ -180,7 +180,7 @@ class XAUScalper:
         # =================================================
         if price < ema.iloc[-1]:
 
-            if last.high > upper_bb.iloc[-1] and last.close < upper_bb.iloc[-1]:
+            if last.high >= upper_bb.iloc[-1] and last.close <= upper_bb.iloc[-1]:
 
                 # News filter check right before signal generation
                 if not self.news_filter.allowed(df.index[-1]):

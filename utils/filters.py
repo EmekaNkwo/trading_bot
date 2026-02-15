@@ -34,14 +34,9 @@ class NewsFilter:
         self.exclude_after = exclude_minutes_after
         
         # High-impact news times (UTC) - these would typically come from a news API
-        # For now, using common high-impact economic release times
-        self.news_times = [
-            # US economic data
-            (13, 30),  # US CPI, GDP, etc.
-            (8, 30),   # UK economic data
-            (9, 0),    # Eurozone data
-            (23, 50),  # AU data (Sydney open)
-        ]
+        # DISABLED: Using empty list until real news feed is integrated
+        # Fake times were blocking legitimate trading opportunities
+        self.news_times = []
     
     def allowed(self, current_time=None):
         """

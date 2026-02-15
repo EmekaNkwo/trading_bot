@@ -28,7 +28,7 @@ class TradingEngine:
         self.candle_seconds = candle_seconds
 
         self.risk = RiskManager(
-            max_trades_per_day=3,
+            max_trades_per_day=10,
             max_daily_loss=0.02,
             max_open_positions=1
         )
