@@ -1,7 +1,7 @@
 import pandas as pd
 from utils.indicators import atr
 from utils.time_utils import SessionFilter
-from utils.filters import SpreadFilter, NewsFilter
+from utils.filters import SpreadFilter
 from utils.logger import setup_logger
 
 
@@ -34,10 +34,6 @@ class XAUScalper:
 
         self.session = SessionFilter()
         self.spread_filter = SpreadFilter(max_spread_points=cfg.get("max_spread_points", 30))
-        self.news_filter = NewsFilter(
-            exclude_minutes_before=cfg.get("news_exclude_before", 15),
-            exclude_minutes_after=cfg.get("news_exclude_after", 15)
-        )
         self.logger = setup_logger()
 
     # ---------------------------------------------------
@@ -75,13 +71,10 @@ class XAUScalper:
             self.logger.info("SESSION FILTER: Market closed - no trading allowed")
             return None
 
-        # Log news and spread filter status
-        news_allowed = self.news_filter.allowed(current_time)
         spread_allowed = self.spread_filter.allowed("XAUUSDm")
         
         self.logger.info(
-            f"FILTER STATUS | News: {'ALLOWED' if news_allowed else 'BLOCKED'} | "
-            f"Spread: {'ALLOWED' if spread_allowed else 'BLOCKED'}"
+            f"FILTER STATUS | Spread: {'ALLOWED' if spread_allowed else 'BLOCKED'}"
         )
 
         # Calculate indicators
@@ -137,10 +130,6 @@ class XAUScalper:
             if last.low <= lower_bb.iloc[-1] and last.close >= lower_bb.iloc[-1]:
 
                 # News filter check right before signal generation
-                if not self.news_filter.allowed(df.index[-1]):
-                    self.logger.info("NEWS FILTER: Skipping BUY trade due to nearby news event")
-                    return None
-
                 # Spread filter check
                 if not self.spread_filter.allowed("XAUUSDm"):
                     self.logger.info("SPREAD FILTER: Spread too wide for buy trade")
@@ -183,10 +172,6 @@ class XAUScalper:
             if last.high >= upper_bb.iloc[-1] and last.close <= upper_bb.iloc[-1]:
 
                 # News filter check right before signal generation
-                if not self.news_filter.allowed(df.index[-1]):
-                    self.logger.info("NEWS FILTER: Skipping SELL trade due to nearby news event")
-                    return None
-
                 # Spread filter check
                 if not self.spread_filter.allowed("XAUUSDm"):
                     self.logger.info("SPREAD FILTER: Spread too wide for sell trade")

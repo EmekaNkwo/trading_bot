@@ -15,6 +15,9 @@ from config.loader import load_config
 from strategy.factory import build_strategy
 
 from utils.logger import setup_logger
+from utils.deal_tracker import ClosedDealTracker
+from utils.trade_reporter import ClosedDealReporter
+from utils.runtime_state import STATE
 
 
 class PortfolioEngine:
@@ -30,6 +33,10 @@ class PortfolioEngine:
         self.drawdown_guard = SymbolDrawdownGuard(max_drawdown_pct=0.02)
         self.cooldown = SymbolCooldown(max_losses=3)
         self.state = PortfolioState()
+        self.deal_tracker = ClosedDealTracker(magic=2601, poll_lookback_minutes=240)
+        self.deal_reporter = ClosedDealReporter()
+        self._last_deal_poll = 0.0
+        self._deal_poll_interval_s = 10.0
 
         # Shared broker connection
         self.broker = MT5Broker()
@@ -38,6 +45,7 @@ class PortfolioEngine:
         self.engines = []
 
         config = load_config()
+        self.scalper_cfg = config.get("scalper", {})
 
         # --------------------------------------------------
         # BUILD ONE ENGINE PER STRATEGY PER SYMBOL
@@ -64,7 +72,8 @@ class PortfolioEngine:
                         "engine": engine,
                         "symbol": symbol,
                         "strategy": strategy_name,
-                        "risk": scfg["risk"]
+                        "risk": scfg["risk"],
+                        "timeframe": scfg["timeframe"],
                     })
                     self.logger.info(f"Created engine: {symbol} - {strategy_name} (risk: {scfg['risk']})")
             else:
@@ -86,7 +95,8 @@ class PortfolioEngine:
                     "engine": engine,
                     "symbol": symbol,
                     "strategy": strategy_name,
-                    "risk": symbol_cfg["risk"]
+                    "risk": symbol_cfg["risk"],
+                    "timeframe": symbol_cfg["timeframe"],
                 })
                 self.logger.info(f"Created engine: {symbol} - {strategy_name} (risk: {symbol_cfg['risk']})")
 
@@ -103,6 +113,46 @@ class PortfolioEngine:
         while allow_fn():
 
             try:
+                # ------------------------------
+                # Deal polling (realized PnL)
+                # ------------------------------
+                now_s = time.time()
+                if now_s - self._last_deal_poll >= self._deal_poll_interval_s:
+                    self._last_deal_poll = now_s
+                    events = self.deal_tracker.poll()
+                    for e in events:
+                        self.deal_reporter.record(
+                            timestamp=e.timestamp_utc,
+                            symbol=e.symbol,
+                            side=e.side,
+                            volume=e.volume,
+                            price=e.price,
+                            pnl=e.pnl,
+                            balance=e.balance,
+                            magic=e.magic,
+                            deal_ticket=e.deal_ticket,
+                            order_ticket=e.order_ticket,
+                            comment=e.comment,
+                        )
+                        STATE.set_last_deal(
+                            {
+                                "timestamp_utc": e.timestamp_utc,
+                                "symbol": e.symbol,
+                                "side": e.side,
+                                "volume": e.volume,
+                                "price": e.price,
+                                "pnl": e.pnl,
+                                "balance": e.balance,
+                                "magic": e.magic,
+                                "deal_ticket": e.deal_ticket,
+                                "order_ticket": e.order_ticket,
+                                "comment": e.comment,
+                            }
+                        )
+                        self.cooldown.record_trade(e.symbol, e.pnl)
+                        self.drawdown_guard.update(e.symbol, e.pnl, account_balance=e.balance)
+                        self.state.record(e.symbol, e.pnl)
+
                 open_risk = self.exposure.total_open_risk()
 
                 for item in self.engines:
@@ -111,6 +161,20 @@ class PortfolioEngine:
                     symbol = item["symbol"]
                     strategy_name = item["strategy"]
                     strategy_risk = item["risk"]
+                    timeframe = item.get("timeframe")
+
+                    # ------------------------------
+                    # Post-entry trailing stop (scalper)
+                    # ------------------------------
+                    scalper_cfg = getattr(self, "scalper_cfg", {}) or {}
+                    if strategy_name == "xau_scalper" and scalper_cfg.get("trailing_stop", True):
+                        engine.executor.manage_trailing_stop(
+                            timeframe=timeframe or "M5",
+                            atr_period=int(scalper_cfg.get("atr_period", 14)),
+                            trailing_atr_multiplier=float(scalper_cfg.get("trailing_atr_multiplier", 1.0)),
+                            trailing_step=float(scalper_cfg.get("trailing_step", 0.5)),
+                            strategy="xau_scalper",
+                        )
 
                     # ------------------------------
                     # Symbol drawdown protection
@@ -142,3 +206,4 @@ class PortfolioEngine:
 
             except Exception as e:
                 self.logger.exception(f"PORTFOLIO ERROR: {e}")
+                STATE.set_error(f"PORTFOLIO ERROR: {e}")

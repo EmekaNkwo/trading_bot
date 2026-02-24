@@ -7,11 +7,16 @@ strategy:
     sl_multiplier: 1.5
     tp_multiplier: 2.0
     rr_ratio: 1.5
-  min_adx: 25
+  # Lower = more trades (but more noise). Start at 20 for evaluation.
+  min_adx: 20
   adx_period: 14
   rsi_period: 14
-  rsi_buy_max: 60
-  rsi_sell_min: 40
+  rsi_buy_max: 65
+  rsi_sell_min: 35
+  # Allow larger distance from EMAs before blocking (more entries in strong trends)
+  max_ema_distance_atr: 2.5
+  # More trades if false (keep true if you prefer cleaner sessions)
+  block_asian_session: true
 
 scalper:
   ema_period: 20
@@ -21,12 +26,36 @@ scalper:
   sl_atr: 1.5
   tp_atr: 1.5  # Tighter TP for scalper (1.5x ATR for quick profits)
   min_candles: 50
-  max_spread_points: 30
-  news_exclude_before: 15
-  news_exclude_after: 15
+  # Wider spread allowance = more trades but riskier fills
+  max_spread_points: 50
   trailing_stop: true
   trailing_atr_multiplier: 1.0
   trailing_step: 0.5
+
+regime:
+  # Adaptive multi-regime strategy (more opportunities)
+  atr_period: 14
+  adx_period: 14
+  ema_fast: 20
+  ema_slow: 80
+  bb_period: 20
+  bb_std: 2.0
+  squeeze_lookback: 120
+  squeeze_pct: 0.2
+  volume_lookback: 20
+  volume_mult: 1.2
+  trend_adx: 22
+  meanrev_adx_max: 18
+  mr_rsi_buy: 35
+  mr_rsi_sell: 65
+  sl_atr_trend: 1.6
+  tp_atr_trend: 2.0
+  sl_atr_breakout: 1.8
+  tp_atr_breakout: 2.2
+  sl_atr_meanrev: 1.3
+  tp_atr_meanrev: 1.3
+  min_bars_between_signals: 3
+  block_asian_session: true
 
 risk:
   max_trades_per_day: 10

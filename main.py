@@ -1,10 +1,13 @@
 import time
+import logging
+import os
+import threading
 from datetime import datetime, timedelta
-from tkinter import W
 
 from utils.logger import setup_logger
 from utils.telegram import TelegramNotifier
-from config.telegram import TOKEN, CHAT_ID
+from config.secrets import get_telegram_credentials
+from utils.runtime_state import STATE
 
 from core.orchestrator import BotOrchestrator
 from core.risk import RiskManager
@@ -35,7 +38,56 @@ from utils.heartbeat import Heartbeat
 # ---------------------------------------------------
 
 logger = setup_logger()
-notifier = TelegramNotifier(TOKEN, CHAT_ID)
+_tg = get_telegram_credentials()
+notifier = TelegramNotifier(_tg.token, _tg.chat_id)
+
+def _start_monitoring_api_background() -> None:
+    """
+    Starts an HTTP API for external monitoring.
+    Defaults to localhost only. Set API_TOKEN to protect remote access.
+    """
+    if os.getenv("MONITORING_API_DISABLED", "").strip() in {"1", "true", "TRUE", "yes", "YES"}:
+        return
+    try:
+        import uvicorn  # noqa: F401
+        from api.server import app
+    except Exception as e:
+        logger.warning(f"Monitoring API not started (missing deps?): {e}")
+        return
+
+    host = os.getenv("MONITORING_API_HOST", "127.0.0.1")
+    port = int(os.getenv("MONITORING_API_PORT", "8000"))
+    log_level = os.getenv("MONITORING_API_LOG_LEVEL", "warning")
+
+    def _run():
+        import uvicorn
+        uvicorn.run(app, host=host, port=port, log_level=log_level)
+
+    t = threading.Thread(target=_run, name="monitoring-api", daemon=True)
+    t.start()
+
+
+def _set_console_log_level(level: int):
+    """
+    Reduce noisy console logs (keep file logs intact).
+    Returns a list of (handler, old_level) to restore.
+    """
+    lg = logging.getLogger("trading_bot")
+    changed = []
+    for h in getattr(lg, "handlers", []):
+        if isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler):
+            old = h.level
+            h.setLevel(level)
+            changed.append((h, old))
+    return changed
+
+
+def _restore_console_log_level(changed):
+    for h, old in changed:
+        try:
+            h.setLevel(old)
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------
@@ -81,7 +133,12 @@ def run_backtest_module():
     strategy = XAUTrendStrategy(config)
     engine = BacktestEngine()
 
-    final_balance = engine.run(df, strategy)
+    # Backtests are verbose (strategy logs every candle). Keep console quiet.
+    changed = _set_console_log_level(logging.WARNING)
+    try:
+        final_balance = engine.run(df, strategy)
+    finally:
+        _restore_console_log_level(changed)
 
     # -----------------------------------------
     # Backtest config (from strategy.yaml)
@@ -150,10 +207,15 @@ def run_walkforward_module():
         step_bars=500
     )
 
-    results = wf.run(
-        df,
-        strategy_factory=lambda: XAUTrendStrategy(config)
-    )
+    # Walk-forward is also verbose; keep console quiet.
+    changed = _set_console_log_level(logging.WARNING)
+    try:
+        results = wf.run(
+            df,
+            strategy_factory=lambda: XAUTrendStrategy(config)
+        )
+    finally:
+        _restore_console_log_level(changed)
 
     if results.empty:
         logger.warning("WALK-FORWARD INVALID | no results produced")
@@ -287,6 +349,7 @@ def main():
     orchestrator = BotOrchestrator(risk)
     heartbeat = Heartbeat(interval_minutes=30)
 
+    _start_monitoring_api_background()
     
     crash_handler = CrashHandler()
     crash_handler.setup_global_handler()
@@ -301,6 +364,7 @@ def main():
         heartbeat.tick()
 
         mode = orchestrator.decide_mode()
+        STATE.set_mode(mode)
     
         now = datetime.utcnow()
 

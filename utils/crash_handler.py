@@ -3,14 +3,16 @@ import traceback
 from datetime import datetime
 from utils.logger import setup_logger
 from utils.telegram import TelegramNotifier
-from config.telegram import TOKEN, CHAT_ID
+from config.secrets import get_telegram_credentials
+from utils.runtime_state import STATE
 
 logger = setup_logger()
 
 
 class CrashHandler:
     def __init__(self):
-        self.notifier = TelegramNotifier(TOKEN, CHAT_ID)
+        tg = get_telegram_credentials()
+        self.notifier = TelegramNotifier(tg.token, tg.chat_id)
     
     def setup_global_handler(self):
         """Install global exception handler"""
@@ -31,6 +33,10 @@ class CrashHandler:
         
         logger.error("CRASH DETECTED")
         logger.error(error_msg)
+        try:
+            STATE.set_error(f"CRASH: {exc_type.__name__}: {str(exc_value)}")
+        except Exception:
+            pass
         
         if self.notifier:
             try:

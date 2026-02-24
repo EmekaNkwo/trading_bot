@@ -6,7 +6,7 @@ A multi-strategy automated trading system for XAUUSD (Gold) using MetaTrader 5, 
 
 - **Platform**: MetaTrader 5 (MT5)
 - **Symbol**: XAUUSDm (Gold)
-- **Strategies**: xau_trend (trend following), xau_scalper (scalping)
+- **Strategies**: xau_trend (trend following), xau_scalper (scalping), xau_regime (adaptive)
 - **Portfolio Mode**: Multiple strategies running concurrently with capital allocation
 - **Risk Management**: Dynamic lot sizing, max drawdown protection, daily trade limits
 
@@ -35,8 +35,10 @@ A multi-strategy automated trading system for XAUUSD (Gold) using MetaTrader 5, 
    ```
 
 4. **Configure Telegram (optional)**:
-   - Edit `config/telegram.py`
-   - Add your bot token and chat ID for trade alerts
+   - Create a `.env` file in the project root with:
+     - `TG_TOKEN=...`
+     - `TG_CHAT_ID=...`
+   - Or set those as environment variables
 
 5. **Configure strategy parameters**:
    - Edit `config/strategy.yaml` for SL/TP multipliers
@@ -50,7 +52,28 @@ A multi-strategy automated trading system for XAUUSD (Gold) using MetaTrader 5, 
 python main.py
 ```
 
-This runs both strategies (trend + scalper) with portfolio risk management.
+This runs your configured portfolio strategies with portfolio risk management.
+
+### Monitoring API (for external apps)
+
+When you run `python main.py`, the bot also starts a local HTTP monitoring API by default:
+
+- **Health**: `GET /health`
+- **Status**: `GET /status`
+- **Recent closed deals**: `GET /deals/recent?limit=50`
+- **List logs**: `GET /logs/list`
+- **Tail logs**: `GET /logs/tail?name=live_trading.log&lines=200`
+
+Defaults:
+- `MONITORING_API_HOST=127.0.0.1`
+- `MONITORING_API_PORT=8000`
+
+Recommended for remote access:
+- Set `API_TOKEN=your-long-random-token` and send `Authorization: Bearer <token>`
+- Set `MONITORING_API_HOST=0.0.0.0` (and secure it via firewall / reverse proxy)
+
+To disable the API:
+- `MONITORING_API_DISABLED=1`
 
 ### Key Configuration Files
 
@@ -58,7 +81,7 @@ This runs both strategies (trend + scalper) with portfolio risk management.
 |------|---------|
 | `config/strategy.yaml` | SL/TP multipliers, ATR settings |
 | `portfolio/config.py` | Capital allocation, max risk |
-| `config/telegram.py` | Alert notifications |
+| `.env` | Telegram + monitoring API env vars |
 
 ### Logs
 

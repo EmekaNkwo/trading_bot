@@ -1,7 +1,7 @@
 import time
 from core.risk import RiskManager
 from utils.telegram import TelegramNotifier
-from config.telegram import TOKEN, CHAT_ID
+from config.secrets import get_telegram_credentials
 from utils.logger import setup_logger, log_separator
 
 
@@ -21,7 +21,8 @@ class TradingEngine:
         self.executor = executor
         self.symbol = symbol
 
-        self.notifier = TelegramNotifier(TOKEN, CHAT_ID)
+        tg = get_telegram_credentials()
+        self.notifier = TelegramNotifier(tg.token, tg.chat_id)
         self.logger = setup_logger()
 
         self.timeframe = timeframe
@@ -89,7 +90,8 @@ class TradingEngine:
 
         # ---------------- EXECUTION ----------------
         result = self.executor.place_market_order(
-            signal=signal
+            signal=signal,
+            risk_pct=getattr(self.executor, "last_risk_pct", None),
         )
 
         if result:

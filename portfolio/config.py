@@ -5,16 +5,24 @@ PORTFOLIO = {
     "symbols": {
         "XAUUSDm": {
             "strategies": {
-                "xau_trend": {
-                    "timeframe": "M15",
-                    "candle_seconds": 900,
-                    "risk": 0.005
-                },
-                "xau_scalper": {
+                # Adaptive regime strategy (enabled)
+                "xau_regime": {
                     "timeframe": "M5",
                     "candle_seconds": 300,
-                    "risk": 0.005
-                }
+                    "risk": 0.01
+                },
+
+                # Previous strategies (paused)
+                # "xau_trend": {
+                #     "timeframe": "M15",
+                #     "candle_seconds": 900,
+                #     "risk": 0.004
+                # },
+                # "xau_scalper": {
+                #     "timeframe": "M5",
+                #     "candle_seconds": 300,
+                #     "risk": 0.004
+                # },
             }
         },
         

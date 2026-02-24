@@ -2,7 +2,7 @@ import pandas as pd
 from datetime import datetime, date
 
 
-def daily_summary(csv_path="reports/live_trades.csv"):
+def daily_summary(csv_path="reports/live_deals.csv"):
 
     try:
         df = pd.read_csv(csv_path)
@@ -19,14 +19,18 @@ def daily_summary(csv_path="reports/live_trades.csv"):
 
     if today_trades.empty:
         return None
-
-    wins = today_trades[today_trades["comment"].str.contains("executed", case=False)]
-    losses = len(today_trades) - len(wins)
+    if "pnl" in today_trades.columns:
+        today_trades["pnl"] = pd.to_numeric(today_trades["pnl"], errors="coerce").fillna(0.0)
+        wins = (today_trades["pnl"] > 0).sum()
+        losses = (today_trades["pnl"] < 0).sum()
+    else:
+        wins = 0
+        losses = 0
 
     summary = {
         "date": str(today),
         "trades": len(today_trades),
-        "wins": len(wins),
+        "wins": int(wins),
         "losses": losses
     }
 

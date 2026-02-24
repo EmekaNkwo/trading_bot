@@ -8,10 +8,18 @@ class TelegramNotifier:
     def __init__(self, token, chat_id):
         self.token = token
         self.chat_id = chat_id
-        self.url = f"https://api.telegram.org/bot{token}/sendMessage"
+        self.enabled = bool(token) and bool(chat_id)
+        self.url = (
+            f"https://api.telegram.org/bot{token}/sendMessage"
+            if self.enabled
+            else None
+        )
 
     def _send_raw(self, message):
         """Internal send method without retry logic"""
+        if not self.enabled:
+            return False
+
         payload = {
             "chat_id": self.chat_id,
             "text": f"[{datetime.utcnow()}]\n{message}"
@@ -27,6 +35,9 @@ class TelegramNotifier:
 
     def send(self, message, max_retries=3):
         """Send message with retry logic"""
+        if not self.enabled:
+            return False
+
         for attempt in range(max_retries):
             if self._send_raw(message):
                 return True

@@ -1,9 +1,49 @@
 import MetaTrader5 as mt5
 from utils.logger import setup_logger, log_separator
 from utils.telegram import TelegramNotifier
-from config.telegram import TOKEN, CHAT_ID
+from config.secrets import get_telegram_credentials
 
 from utils.trade_reporter import LiveTradeReporter
+from utils.indicators import atr
+import pandas as pd
+
+
+def _strategy_code(strategy: str) -> str:
+    return {
+        "xau_trend": "xt",
+        "xau_scalper": "xs",
+    }.get(strategy, "uk")
+
+
+def _build_order_comment(strategy: str, risk_pct: float | None) -> str:
+    # MT5 order comments have small length limits; keep this compact.
+    # Format: pb|<strat>|r=<risk>
+    if risk_pct is None:
+        return f"pb|{_strategy_code(strategy)}"
+
+    risk_str = f"{float(risk_pct):.4f}"
+    return f"pb|{_strategy_code(strategy)}|r={risk_str}"
+
+def _tf(tf: str):
+    return {
+        "M1": mt5.TIMEFRAME_M1,
+        "M5": mt5.TIMEFRAME_M5,
+        "M15": mt5.TIMEFRAME_M15,
+        "H1": mt5.TIMEFRAME_H1,
+    }.get(tf, mt5.TIMEFRAME_M5)
+
+
+def _parse_strategy_from_comment(comment: str | None) -> str:
+    if not comment:
+        return "unknown"
+    c = str(comment)
+    if not c.startswith("pb|"):
+        return "unknown"
+    parts = c.split("|")
+    if len(parts) < 2:
+        return "unknown"
+    code = parts[1]
+    return {"xt": "xau_trend", "xs": "xau_scalper"}.get(code, "unknown")
 
 
 class MT5Executor:
@@ -12,7 +52,8 @@ class MT5Executor:
         self.symbol = symbol
         self.logger = setup_logger()
         self.reporter = LiveTradeReporter()
-        self.notifier = TelegramNotifier(TOKEN, CHAT_ID)
+        tg = get_telegram_credentials()
+        self.notifier = TelegramNotifier(tg.token, tg.chat_id)
 
         # portfolio-aware state
         self.current_lot = 0.01        # default fallback
@@ -80,6 +121,114 @@ class MT5Executor:
         self.last_risk_pct = risk_pct
         self.last_balance = current_balance
         self.last_recalc_time = current_time
+
+    # -------------------------------------------------
+    # TRAILING STOP MANAGEMENT (post-entry)
+    # -------------------------------------------------
+
+    def manage_trailing_stop(
+        self,
+        *,
+        timeframe: str,
+        atr_period: int,
+        trailing_atr_multiplier: float,
+        trailing_step: float,
+        strategy: str | None = None,
+        magic: int = 2601,
+        bars: int = 200,
+    ):
+        """
+        True trailing stop: modifies SL on open positions.
+        Only tightens SL (never loosens).
+
+        trailing_step: fraction of ATR required before sending another SL update
+        """
+        try:
+            positions = mt5.positions_get(symbol=self.symbol)
+        except Exception:
+            return
+
+        if not positions:
+            return
+
+        # Get ATR from recent candles
+        try:
+            rates = mt5.copy_rates_from_pos(self.symbol, _tf(timeframe), 0, bars)
+            if rates is None:
+                return
+            df = pd.DataFrame(rates)
+            if df.empty:
+                return
+            atr_val = atr(df.rename(columns={"tick_volume": "tick_volume"}), atr_period).iloc[-1]
+            if atr_val is None or pd.isna(atr_val) or float(atr_val) <= 0:
+                return
+            atr_val = float(atr_val)
+        except Exception:
+            return
+
+        # Current market price
+        tick = mt5.symbol_info_tick(self.symbol)
+        if not tick:
+            return
+
+        trail_dist = atr_val * float(trailing_atr_multiplier)
+        step_dist = atr_val * float(trailing_step)
+        if step_dist <= 0:
+            step_dist = atr_val * 0.25
+
+        for p in positions:
+            if getattr(p, "magic", None) != magic:
+                continue
+
+            p_strategy = _parse_strategy_from_comment(getattr(p, "comment", None))
+            if strategy and p_strategy != strategy:
+                continue
+
+            # Only apply to scalper by default
+            if strategy is None and p_strategy != "xau_scalper":
+                continue
+
+            sl = float(getattr(p, "sl", 0.0) or 0.0)
+            tp = float(getattr(p, "tp", 0.0) or 0.0)
+            ticket = getattr(p, "ticket", None)
+            if ticket is None:
+                continue
+
+            # Determine direction: MT5 uses 0 buy / 1 sell for position.type typically
+            ptype = getattr(p, "type", None)
+            is_buy = (ptype == mt5.POSITION_TYPE_BUY) if hasattr(mt5, "POSITION_TYPE_BUY") else (ptype == 0)
+
+            if is_buy:
+                price = float(tick.bid)
+                new_sl = price - trail_dist
+                if sl > 0 and new_sl <= sl + step_dist:
+                    continue
+                if sl > 0:
+                    new_sl = max(new_sl, sl)
+            else:
+                price = float(tick.ask)
+                new_sl = price + trail_dist
+                if sl > 0 and new_sl >= sl - step_dist:
+                    continue
+                if sl > 0:
+                    new_sl = min(new_sl, sl)
+
+            req = {
+                "action": mt5.TRADE_ACTION_SLTP,
+                "position": int(ticket),
+                "symbol": self.symbol,
+                "sl": float(new_sl),
+                "tp": float(tp) if tp > 0 else 0.0,
+                "magic": magic,
+                "comment": "pb|trail",
+            }
+
+            try:
+                res = mt5.order_send(req)
+                if res and getattr(res, "retcode", None) == mt5.TRADE_RETCODE_DONE:
+                    self.logger.info(f"TRAILING SL UPDATED | {self.symbol} | SL={new_sl:.3f}")
+            except Exception:
+                continue
 
     def _risk_to_lot(self, risk_pct, sl_ticks=None, strategy="unknown"):
         """
@@ -276,7 +425,7 @@ class MT5Executor:
             strategy_name = signal.get("strategy", "unknown")
             
             # Calculate lot based on actual SL distance and strategy type
-            calc_risk = risk_pct if risk_pct else (self.last_risk_pct or 0.005)
+            calc_risk = risk_pct if risk_pct is not None else (self.last_risk_pct or 0.005)
             lot = self._risk_to_lot(calc_risk, sl_ticks, strategy_name)
             
             self.logger.info(
@@ -304,6 +453,9 @@ class MT5Executor:
         else:
             order_type = mt5.ORDER_TYPE_SELL
 
+        # Use compact comment to allow exposure/risk tracking from open positions.
+        comment = _build_order_comment(strategy_name, risk_pct if risk_pct is not None else self.last_risk_pct)
+
         request = {
             "action": mt5.TRADE_ACTION_DEAL,
             "symbol": self.symbol,
@@ -314,7 +466,7 @@ class MT5Executor:
             "tp": signal["tp"],
             "deviation": 20,
             "magic": 2601,
-            "comment": "portfolio-bot",
+            "comment": comment,
             "type_time": mt5.ORDER_TIME_GTC,
             "type_filling": mt5.ORDER_FILLING_IOC,
         }

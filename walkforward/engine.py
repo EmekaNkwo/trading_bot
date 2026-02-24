@@ -43,7 +43,14 @@ class WalkForwardEngine:
                 starting_balance=self.starting_balance
             )
 
-            engine.run(test_df, strategy)
+            # Warm up indicators on training slice, but only allow entries in the test slice.
+            combined = df.iloc[start:test_end]
+            engine.run(
+                combined,
+                strategy,
+                trade_start_idx=len(train_df),
+                history_window=None,
+            )
 
             metrics = backtest_metrics(
                 engine.trades,

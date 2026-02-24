@@ -39,6 +39,10 @@ class XAUTrendStrategy:
         self.rsi_buy_max = strategy_cfg.get("rsi_buy_max", 60)  # Don't buy if RSI > 60 (overbought)
         self.rsi_sell_min = strategy_cfg.get("rsi_sell_min", 40)  # Don't sell if RSI < 40 (oversold)
 
+        # Entry permissiveness (lets you tune trade frequency)
+        self.max_ema_distance_atr = strategy_cfg.get("max_ema_distance_atr", 1.5)
+        self.block_asian_session = strategy_cfg.get("block_asian_session", True)
+
         # Session filter
         self.session = SessionFilter()
 
@@ -60,7 +64,7 @@ class XAUTrendStrategy:
         """Check if price is too far from EMAs (chasing = bad entries)"""
         avg_ema = (ema_fast + ema_slow) / 2
         distance = abs(price - avg_ema)
-        max_distance = atr_val * 1.5  # Don't trade if price > 1.5 ATR from EMAs
+        max_distance = atr_val * float(self.max_ema_distance_atr)
         return distance > max_distance
 
     def on_candle(self, df):
@@ -78,8 +82,8 @@ class XAUTrendStrategy:
             self.logger.info("SESSION FILTER: Market closed")
             return None
 
-        # NEW: Block Asian session (choppy, fake breakouts)
-        if self._is_asian_session(current_time):
+        # Optional: Block Asian session (choppy, fake breakouts)
+        if self.block_asian_session and self._is_asian_session(current_time):
             self.logger.info("ASIAN SESSION BLOCKED: Avoiding choppy conditions")
             return None
 

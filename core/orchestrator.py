@@ -13,6 +13,8 @@ class BotOrchestrator:
         self.risk = risk_manager
 
         self.last_walkforward_date = None
+        self.last_backtest_date = None
+        self.last_rotation_date = None
 
         self.rollback = ParameterRollback()
         self.guard = PerformanceGuard()
@@ -62,6 +64,15 @@ class BotOrchestrator:
         )
 
     def allow_rotation(self):
+        now = datetime.utcnow()
+
+        # Run rotation only once per day, during quiet hours (night UTC).
+        if self.last_rotation_date == now.date():
+            return False
+
+        if not (now.hour >= 22 or now.hour <= 2):
+            return False
+
         state = self.rollback.load_state()
         last = state.get("last_rotation")
 
@@ -72,7 +83,6 @@ class BotOrchestrator:
         return (datetime.utcnow() - last).days >= 30
 
     def allow_walkforward(self):
-
         now = datetime.utcnow()
 
         # only once per day
@@ -85,6 +95,22 @@ class BotOrchestrator:
 
         return True
 
+    def allow_backtest(self):
+        """
+        Backtest is heavy and verbose; run it autonomously only in a short night window.
+        """
+        now = datetime.utcnow()
+
+        # only once per day
+        if self.last_backtest_date == now.date():
+            return False
+
+        # Backtest window: 03:00–06:59 UTC (after walk-forward, before London)
+        if 3 <= now.hour <= 6:
+            return True
+
+        return False
+
     # -------------------------------------------------
     # MAIN DECISION ENGINE
     # -------------------------------------------------
@@ -93,21 +119,8 @@ class BotOrchestrator:
 
         now = datetime.utcnow()
 
-        # HARD STOPS
-        if self.is_weekend():
-            return "idle"
-
-        if self.risk.kill_switch:
-            return "idle"
-
-        if not self.mt5_connected():
-            return "idle"
-
-        if not self._check_drawdown(max_drawdown_pct=0.10):
-            return "idle"
-
-        # LIVE (PORTFOLIO)
-        if self.allow_live():
+        # LIVE is the only mode that requires MT5 connection.
+        if self.allow_live() and self._check_drawdown(max_drawdown_pct=0.10):
             return "live"
 
         # WALK-FORWARD (NIGHTLY RESEARCH)
@@ -117,7 +130,12 @@ class BotOrchestrator:
 
         # PARAMETER ROTATION (MONTHLY)
         if self.allow_rotation():
+            self.last_rotation_date = now.date()
             return "rotate"
 
-        # DEFAULT OFF-SESSION ACTIVITY
-        return "backtest"
+        # BACKTEST (NIGHTLY, light schedule)
+        if self.allow_backtest():
+            self.last_backtest_date = now.date()
+            return "backtest"
+
+        return "idle"

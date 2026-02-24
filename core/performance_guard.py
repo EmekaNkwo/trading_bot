@@ -8,7 +8,7 @@ class PerformanceGuard:
         self,
         max_drawdown_pct=0.05,
         min_trades=20,
-        history_file="reports/live_trades.csv"
+        history_file="reports/live_deals.csv"
     ):
         self.max_dd = max_drawdown_pct
         self.min_trades = min_trades
@@ -21,13 +21,25 @@ class PerformanceGuard:
         except Exception:
             return True
 
+        if df is None or df.empty:
+            return True
+
+        # We require balance snapshots to compute drawdown % robustly.
+        if "balance" not in df.columns:
+            return True
+
+        df["balance"] = pd.to_numeric(df["balance"], errors="coerce")
+        df = df.dropna(subset=["balance"])
+
         if len(df) < self.min_trades:
             return True
 
-        pnl = df["pnl"].dropna()
+        bal = df["balance"]
+        peak = bal.cummax()
+        peak = peak.where(peak > 0)
 
-        equity = pnl.cumsum()
+        dd_pct = ((peak - bal) / peak).max()
+        if pd.isna(dd_pct):
+            return True
 
-        dd = (equity.cummax() - equity).max()
-
-        return dd <= self.max_dd
+        return float(dd_pct) <= float(self.max_dd)
