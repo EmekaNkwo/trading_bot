@@ -9,7 +9,14 @@ PORTFOLIO = {
                 "xau_regime": {
                     "timeframe": "M5",
                     "candle_seconds": 300,
-                    "risk": 0.01
+                    "risk": 0.007
+                },
+
+                # Liquidity sweep dual-mode strategy (enabled, conservative)
+                "xau_sweep": {
+                    "timeframe": "M5",
+                    "candle_seconds": 300,
+                    "risk": 0.003
                 },
 
                 # Previous strategies (paused)

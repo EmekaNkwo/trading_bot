@@ -57,10 +57,46 @@ regime:
   min_bars_between_signals: 3
   block_asian_session: true
 
+sweep:
+  # Liquidity sweep dual-mode strategy (fade vs continuation)
+  atr_period: 14
+  adx_period: 14
+  rsi_period: 7
+
+  # Liquidity map (levels -> clustered bands)
+  swing_left: 3
+  swing_right: 3
+  swing_lookback_bars: 800
+  swing_max_levels: 40
+  cluster_atr_mult: 0.12
+
+  # Sweep detection
+  sweep_min_atr: 0.12
+  reclaim_bars: 4
+  accept_bars: 1
+
+  # Mode selection filters
+  fade_adx_max: 26
+  cont_adx_min: 22
+  cont_body_atr_mult: 0.35
+  wick_reject_ratio: 0.45
+  rsi_oversold: 30
+  rsi_overbought: 70
+
+  # Risk model (SL/TP in ATR)
+  sl_buffer_atr: 0.10
+  tp_fade_atr: 0.60
+  tp_cont_atr: 0.80
+
+  # Throttles (reduce overtrading)
+  min_bars_between_signals: 1
+  cooldown_minutes: 10
+  band_key_step: 0.5
+
 risk:
-  max_trades_per_day: 10
+  max_trades_per_day: 30
   max_daily_loss: 0.02
-  max_open_positions: 1
+  max_open_positions: 3
 
 rotation:
   enabled: true

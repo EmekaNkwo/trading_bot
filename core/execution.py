@@ -1,4 +1,5 @@
 import MetaTrader5 as mt5
+import os
 from utils.logger import setup_logger, log_separator
 from utils.telegram import TelegramNotifier
 from config.secrets import get_telegram_credentials
@@ -6,12 +7,15 @@ from config.secrets import get_telegram_credentials
 from utils.trade_reporter import LiveTradeReporter
 from utils.indicators import atr
 import pandas as pd
+from typing import Any
 
 
 def _strategy_code(strategy: str) -> str:
     return {
         "xau_trend": "xt",
         "xau_scalper": "xs",
+        "xau_regime": "xr",
+        "xau_sweep": "xw",
     }.get(strategy, "uk")
 
 
@@ -43,7 +47,135 @@ def _parse_strategy_from_comment(comment: str | None) -> str:
     if len(parts) < 2:
         return "unknown"
     code = parts[1]
-    return {"xt": "xau_trend", "xs": "xau_scalper"}.get(code, "unknown")
+    return {"xt": "xau_trend", "xs": "xau_scalper", "xr": "xau_regime", "xw": "xau_sweep"}.get(code, "unknown")
+
+
+def _retcode_name(retcode: Any) -> str:
+    if not isinstance(retcode, int):
+        return str(retcode)
+    m = getattr(_retcode_name, "_map", None)
+    if m is None:
+        m = {}
+        for n in dir(mt5):
+            if not n.startswith("TRADE_RETCODE_"):
+                continue
+            try:
+                v = getattr(mt5, n)
+            except Exception:
+                continue
+            if isinstance(v, int):
+                m[v] = n
+        setattr(_retcode_name, "_map", m)
+    return m.get(retcode, str(retcode))
+
+
+def _human_failure_reason(
+    *,
+    symbol: str,
+    side: str,
+    lot: float | None,
+    price: float | None,
+    sl: float | None,
+    tp: float | None,
+    deviation_points: int | None,
+    retcode: Any,
+    comment: str | None,
+) -> str:
+    """
+    Produces a concise, actionable explanation for MT5 order failures.
+    """
+    lines: list[str] = []
+
+    rname = _retcode_name(retcode)
+    lines.append(f"retcode_name={rname}")
+
+    try:
+        le = mt5.last_error()
+        if le:
+            lines.append(f"mt5_last_error={le}")
+    except Exception:
+        pass
+
+    info = None
+    tick = None
+    try:
+        info = mt5.symbol_info(symbol)
+        tick = mt5.symbol_info_tick(symbol)
+    except Exception:
+        info = None
+        tick = None
+
+    if info is not None:
+        try:
+            point = float(getattr(info, "point", 0.0) or 0.0)
+        except Exception:
+            point = 0.0
+        try:
+            tick_size = float(getattr(info, "trade_tick_size", 0.0) or 0.0)
+        except Exception:
+            tick_size = 0.0
+        if point <= 0:
+            point = tick_size if tick_size > 0 else 0.01
+
+        stops_level_points = int(getattr(info, "trade_stops_level", 0) or 0)
+        freeze_level_points = int(getattr(info, "trade_freeze_level", 0) or 0)
+        min_stop = float(stops_level_points) * point
+        freeze = float(freeze_level_points) * point
+
+        if min_stop > 0:
+            lines.append(f"min_stop_distance={min_stop:.6f} (stops_level={stops_level_points} points)")
+        if freeze > 0:
+            lines.append(f"freeze_distance={freeze:.6f} (freeze_level={freeze_level_points} points)")
+
+        if deviation_points is not None and deviation_points >= 0:
+            lines.append(f"deviation={deviation_points} points (~{deviation_points * point:.6f} price)")
+
+        if price is not None:
+            if sl is not None:
+                sl_dist = abs(float(price) - float(sl))
+                lines.append(f"sl_distance={sl_dist:.6f}")
+                if min_stop > 0 and sl_dist < min_stop:
+                    lines.append("diagnosis=SL too close (increase SL distance or use wider ATR)")
+            if tp is not None:
+                tp_dist = abs(float(price) - float(tp))
+                lines.append(f"tp_distance={tp_dist:.6f}")
+                if min_stop > 0 and tp_dist < min_stop:
+                    lines.append("diagnosis=TP too close (increase TP distance)")
+
+    if tick is not None:
+        try:
+            bid = float(getattr(tick, "bid", 0.0) or 0.0)
+            ask = float(getattr(tick, "ask", 0.0) or 0.0)
+            if bid > 0 and ask > 0:
+                lines.append(f"spread={ask - bid:.6f}")
+        except Exception:
+            pass
+
+    c = (comment or "").lower()
+    if "market closed" in c or "market is closed" in c:
+        lines.append("diagnosis=Market closed / trading disabled for symbol")
+    if "invalid stops" in c or "stops" in c and ("invalid" in c or "wrong" in c):
+        lines.append("diagnosis=Invalid stops (SL/TP violates broker stop level/freeze level)")
+    if "not enough money" in c or "no money" in c:
+        lines.append("diagnosis=Insufficient margin/funds (reduce lot or increase free margin)")
+    if "off quotes" in c or "requote" in c or "price changed" in c:
+        lines.append("diagnosis=Requote/off-quotes (consider higher deviation or retry logic)")
+
+    # If we still don't have a diagnosis, hint by retcode name
+    if not any(s.startswith("diagnosis=") for s in lines):
+        if "INVALID_STOPS" in rname:
+            lines.append("diagnosis=Invalid stops (SL/TP too close or inside freeze level)")
+        elif "NO_MONEY" in rname:
+            lines.append("diagnosis=Insufficient margin/funds")
+        elif "MARKET_CLOSED" in rname:
+            lines.append("diagnosis=Market closed / symbol not tradable now")
+        elif "PRICE_CHANGED" in rname or "REQUOTE" in rname:
+            lines.append("diagnosis=Price moved too fast (requote/off-quotes)")
+
+    # Summary line first, then key/value lines for scanability
+    summary = next((s for s in lines if s.startswith("diagnosis=")), "diagnosis=Unknown (see details)")
+    details = "\n".join(f"  {x}" for x in lines if not x.startswith("diagnosis="))
+    return f"{summary}\n{details}".strip()
 
 
 class MT5Executor:
@@ -346,20 +478,30 @@ class MT5Executor:
         if margin_required > account.margin_free:
             return {"valid": False, "reason": f"Insufficient margin: need ${margin_required:.2f}, have ${account.margin_free:.2f}"}
         
-        # Check position size limits (max 2% of account per trade)
-        max_risk_per_trade = account.balance * 0.02
-        position_value = lot * 100000  # XAUUSDm: 1 lot = 100,000 units
-        
-        if position_value > max_risk_per_trade * 10:  # 10x leverage consideration
-            return {"valid": False, "reason": f"Position too large: ${position_value:.2f} > ${max_risk_per_trade * 10:.2f}"}
+        # Check per-trade margin usage cap (prevents oversized exposure).
+        # Use MT5's own margin calculation (symbol/leverage-aware) instead of hardcoded contract assumptions.
+        try:
+            max_margin_pct = float(os.getenv("MAX_MARGIN_PCT_PER_TRADE", "0.30"))
+        except Exception:
+            max_margin_pct = 0.30
+        max_margin_pct = max(0.01, min(0.95, max_margin_pct))
+
+        max_margin_allowed = float(account.balance) * max_margin_pct
+        if float(margin_required) > max_margin_allowed:
+            return {
+                "valid": False,
+                "reason": f"Margin too high: need ${margin_required:.2f} > ${max_margin_allowed:.2f} ({max_margin_pct*100:.0f}% of balance)",
+            }
         
         return {"valid": True, "reason": "OK"}
 
     def _check_account_protection(self):
         """Check overall account protection levels"""
+        self._last_protection_block_reason = None
         account = mt5.account_info()
         if not account:
-            return
+            self._last_protection_block_reason = "No account info"
+            return False
         
         # Daily loss tracking
         if hasattr(self, '_daily_start_balance'):
@@ -367,6 +509,9 @@ class MT5Executor:
             max_daily_loss = account.balance * 0.05  # 5% daily loss limit
             
             if daily_pnl < -max_daily_loss:
+                self._last_protection_block_reason = (
+                    f"Daily loss limit hit: pnl=${daily_pnl:.2f} < -${max_daily_loss:.2f}"
+                )
                 self.logger.error(f"DAILY LOSS LIMIT HIT | Loss: ${daily_pnl:.2f} | Limit: ${max_daily_loss:.2f}")
                 return False
         else:
@@ -375,6 +520,7 @@ class MT5Executor:
         # Equity protection
         equity_ratio = account.equity / account.balance if account.balance > 0 else 1
         if equity_ratio < 0.9:  # 10% equity drawdown
+            self._last_protection_block_reason = f"Equity protection: equity/balance={equity_ratio:.2f} < 0.90"
             self.logger.error(f"EQUITY PROTECTION | Equity ratio: {equity_ratio:.2f}")
             return False
         
@@ -444,7 +590,8 @@ class MT5Executor:
         # Check account protection levels
         self.logger.info("[EXECUTE] Checking account protection...")
         if not self._check_account_protection():
-            self.logger.error("[EXECUTE BLOCKED] Account protection prevented trade")
+            reason = getattr(self, "_last_protection_block_reason", None) or "Account protection prevented trade"
+            self.logger.error(f"[EXECUTE BLOCKED] {reason}")
             return None
         self.logger.info("[EXECUTE] Account protection passed")
 
@@ -481,21 +628,33 @@ class MT5Executor:
 
             retcode = result.retcode if result else "NO_RESULT"
             comment = result.comment if result else "NO_RESPONSE"
+            human = _human_failure_reason(
+                symbol=self.symbol,
+                side=str(signal.get("side", "")).lower(),
+                lot=float(lot) if lot is not None else None,
+                price=float(price) if price is not None else None,
+                sl=float(signal.get("sl")) if signal.get("sl") is not None else None,
+                tp=float(signal.get("tp")) if signal.get("tp") is not None else None,
+                deviation_points=int(request.get("deviation", 0)) if isinstance(request.get("deviation", 0), int) else None,
+                retcode=retcode,
+                comment=str(comment) if comment is not None else None,
+            )
 
             strategy_name = signal.get("strategy", "unknown")
             log_separator(self.logger, f"ORDER FAILED - {strategy_name.upper()}", char="-", width=50)
             self.logger.error(
                 f"  Symbol: {self.symbol}\n"
                 f"  Side: {signal['side'].upper()}\n"
-                f"  Retcode: {retcode}\n"
-                f"  Reason: {comment}"
+                f"  Retcode: {retcode} ({_retcode_name(retcode)})\n"
+                f"  Reason: {comment}\n"
+                f"  {human}"
             )
             log_separator(self.logger, char="-", width=50)
 
             self.notifier.send(
                 f"ORDER FAILED | {strategy_name.upper()}\n"
                 f"{self.symbol} {signal['side'].upper()}\n"
-                f"Reason: {comment}"
+                f"Reason: {human.splitlines()[0]}"
             )
 
             self.reporter.record(
