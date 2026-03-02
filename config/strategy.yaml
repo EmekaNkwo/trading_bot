@@ -124,6 +124,16 @@ session:
     allow_london: true
     allow_newyork: true
 
+walkforward:
+    # Make walk-forward produce enough trades to be meaningful.
+    timeframe: M5
+    strategy: xau_sweep
+    train_bars: 6000
+    test_bars: 2000
+    step_bars: 2000
+    min_trades: 10
+    bars: 20000
+
 backtest:
     period_days: 90
     min_trades: 25

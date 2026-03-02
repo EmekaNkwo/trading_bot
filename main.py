@@ -25,6 +25,7 @@ from research.parameter_rotation import run_parameter_rotation
 from reports.performance import daily_summary
 
 from strategy.xau_trend import XAUTrendStrategy
+from strategy.factory import build_strategy
 from config.loader import load_config
 
 from portfolio.engine import PortfolioEngine
@@ -193,26 +194,43 @@ def run_walkforward_module():
     notifier.send("WALK-FORWARD MODE STARTED")
 
     config = load_config()
-    df = load_from_csv("XAUUSDm", "M15")
+    wf_cfg = (config or {}).get("walkforward", {}) or {}
+    symbol = str(wf_cfg.get("symbol", "XAUUSDm"))
+    timeframe = str(wf_cfg.get("timeframe", "M5"))
+
+    try:
+        df = load_from_csv(symbol, timeframe)
+    except FileNotFoundError:
+        logger.warning("Historical data missing for walk-forward, fetching from MT5")
+        broker = MT5Broker()
+        bars = int(wf_cfg.get("bars", 20000))
+        df = broker.get_historical_data(
+            symbol=symbol,
+            timeframe=timeframe,
+            bars=bars,
+        )
+        save_to_csv(df, symbol, timeframe)
+        broker.shutdown()
 
     # -----------------------------------------
     # Strategy backtest constraints (shared)
     # -----------------------------------------
-    wt_cfg = config.get("backtest", {})
-    min_trades = wt_cfg.get("min_trades", 0)
+    wt_cfg = config.get("backtest", {}) or {}
+    min_trades = int(wf_cfg.get("min_trades", wt_cfg.get("min_trades", 0)))
 
     wf = WalkForwardEngine(
-        train_bars=2000,
-        test_bars=500,
-        step_bars=500
+        train_bars=int(wf_cfg.get("train_bars", 6000)),
+        test_bars=int(wf_cfg.get("test_bars", 2000)),
+        step_bars=int(wf_cfg.get("step_bars", 2000)),
     )
 
     # Walk-forward is also verbose; keep console quiet.
     changed = _set_console_log_level(logging.WARNING)
     try:
+        strat_name = str(wf_cfg.get("strategy", "xau_sweep"))
         results = wf.run(
             df,
-            strategy_factory=lambda: XAUTrendStrategy(config)
+            strategy_factory=lambda: build_strategy(strat_name, config)
         )
     finally:
         _restore_console_log_level(changed)
