@@ -1,5 +1,6 @@
 import MetaTrader5 as mt5
 import os
+import time
 from utils.logger import setup_logger, log_separator
 from utils.telegram import TelegramNotifier
 from config.secrets import get_telegram_credentials
@@ -176,6 +177,220 @@ def _human_failure_reason(
     summary = next((s for s in lines if s.startswith("diagnosis=")), "diagnosis=Unknown (see details)")
     details = "\n".join(f"  {x}" for x in lines if not x.startswith("diagnosis="))
     return f"{summary}\n{details}".strip()
+
+
+def _round_price(symbol: str, value: float) -> float:
+    info = None
+    try:
+        info = mt5.symbol_info(symbol)
+    except Exception:
+        info = None
+    digits = 3
+    if info is not None:
+        try:
+            digits = int(getattr(info, "digits", digits))
+        except Exception:
+            digits = digits
+    try:
+        return round(float(value), int(digits))
+    except Exception:
+        return float(value)
+
+
+def _apply_min_stop_distance(symbol: str, *, price: float, side: str, sl: float, tp: float) -> tuple[float, float, list[str]]:
+    """
+    Ensures SL/TP are not closer than broker's stop level (best-effort).
+    """
+    notes: list[str] = []
+    info = None
+    try:
+        info = mt5.symbol_info(symbol)
+    except Exception:
+        info = None
+    if info is None:
+        return sl, tp, notes
+
+    try:
+        point = float(getattr(info, "point", 0.0) or 0.0)
+    except Exception:
+        point = 0.0
+    if point <= 0:
+        try:
+            point = float(getattr(info, "trade_tick_size", 0.0) or 0.01)
+        except Exception:
+            point = 0.01
+
+    stops_level_points = int(getattr(info, "trade_stops_level", 0) or 0)
+    if stops_level_points <= 0:
+        return sl, tp, notes
+
+    min_dist = float(stops_level_points) * point
+    # Give a tiny safety cushion
+    min_dist *= 1.05
+
+    if side == "buy":
+        if (price - sl) < min_dist:
+            sl = price - min_dist
+            notes.append("sl_widened_to_meet_stops_level")
+        if (tp - price) < min_dist:
+            tp = price + min_dist
+            notes.append("tp_widened_to_meet_stops_level")
+    else:
+        if (sl - price) < min_dist:
+            sl = price + min_dist
+            notes.append("sl_widened_to_meet_stops_level")
+        if (price - tp) < min_dist:
+            tp = price - min_dist
+            notes.append("tp_widened_to_meet_stops_level")
+
+    return sl, tp, notes
+
+
+def _dynamic_deviation_points(symbol: str) -> int:
+    """
+    Computes a deviation (in points) based on live spread.
+    Keeps it bounded so we don't accept wildly bad fills.
+    """
+    try:
+        base = int(os.getenv("DEVIATION_BASE_POINTS", "20"))
+    except Exception:
+        base = 20
+    try:
+        mult = float(os.getenv("DEVIATION_SPREAD_MULT", "1.5"))
+    except Exception:
+        mult = 1.5
+    try:
+        min_pts = int(os.getenv("DEVIATION_MIN_POINTS", "10"))
+    except Exception:
+        min_pts = 10
+    try:
+        max_pts = int(os.getenv("DEVIATION_MAX_POINTS", "120"))
+    except Exception:
+        max_pts = 120
+
+    base = max(0, base)
+    min_pts = max(0, min_pts)
+    max_pts = max(min_pts, max_pts)
+
+    info = None
+    tick = None
+    try:
+        info = mt5.symbol_info(symbol)
+        tick = mt5.symbol_info_tick(symbol)
+    except Exception:
+        info = None
+        tick = None
+
+    if info is None or tick is None:
+        return max(min_pts, min(max_pts, base))
+
+    try:
+        point = float(getattr(info, "point", 0.0) or 0.0)
+    except Exception:
+        point = 0.0
+    if point <= 0:
+        try:
+            point = float(getattr(info, "trade_tick_size", 0.0) or 0.01)
+        except Exception:
+            point = 0.01
+
+    try:
+        bid = float(getattr(tick, "bid", 0.0) or 0.0)
+        ask = float(getattr(tick, "ask", 0.0) or 0.0)
+    except Exception:
+        bid = 0.0
+        ask = 0.0
+
+    if bid <= 0 or ask <= 0 or ask < bid:
+        return max(min_pts, min(max_pts, base))
+
+    spread_points = int(round((ask - bid) / point)) if point > 0 else base
+    dyn = int(round(base + (spread_points * mult)))
+    return max(min_pts, min(max_pts, dyn))
+
+
+def _should_retry_retcode(retcode: Any) -> bool:
+    name = _retcode_name(retcode)
+    # Be conservative: only retry transient quote/price issues.
+    transient = ("REQUOTE", "PRICE_CHANGED", "OFF_QUOTES")
+    return any(t in name for t in transient)
+
+
+def _normalize_levels_for_execution(
+    *,
+    symbol: str,
+    side: str,
+    price: float,
+    sl: float,
+    tp: float,
+    entry_ref: float | None,
+    min_rr: float | None,
+) -> tuple[float, float, list[str]]:
+    """
+    1) Shift SL/TP by delta between signal entry_ref and actual entry price
+    2) Enforce min R:R by pushing TP outward (never inward)
+    3) Best-effort ensure stops_level distance
+    """
+    notes: list[str] = []
+
+    # Step 1: re-anchor to actual entry price (spread-safe)
+    if entry_ref is not None:
+        try:
+            delta = float(price) - float(entry_ref)
+            sl2 = float(sl) + delta
+            tp2 = float(tp) + delta
+
+            # Keep levels on correct side of market
+            if side == "buy":
+                if sl2 < price:
+                    sl = sl2
+                else:
+                    notes.append("sl_anchor_skipped_wrong_side")
+                if tp2 > price:
+                    tp = tp2
+                else:
+                    notes.append("tp_anchor_skipped_wrong_side")
+            else:
+                if sl2 > price:
+                    sl = sl2
+                else:
+                    notes.append("sl_anchor_skipped_wrong_side")
+                if tp2 < price:
+                    tp = tp2
+                else:
+                    notes.append("tp_anchor_skipped_wrong_side")
+
+            notes.append(f"anchored_delta={delta:.6f}")
+        except Exception:
+            pass
+
+    # Step 2: enforce min R:R (push TP outward only)
+    if min_rr is None:
+        try:
+            min_rr = float(os.getenv("MIN_RR_DEFAULT", "1.2"))
+        except Exception:
+            min_rr = 1.2
+    try:
+        min_rr = float(min_rr)
+    except Exception:
+        min_rr = 1.2
+    min_rr = max(0.8, min(5.0, min_rr))
+
+    sl_dist = abs(float(price) - float(sl))
+    tp_dist = abs(float(tp) - float(price))
+    if sl_dist > 0 and tp_dist < (sl_dist * min_rr):
+        need = sl_dist * min_rr
+        if side == "buy":
+            tp = float(price) + need
+        else:
+            tp = float(price) - need
+        notes.append(f"tp_pushed_for_min_rr={min_rr:.2f}")
+
+    # Step 3: best-effort minimum stop distance
+    sl, tp, stop_notes = _apply_min_stop_distance(symbol, price=price, side=side, sl=sl, tp=tp)
+    notes.extend(stop_notes)
+
+    return _round_price(symbol, sl), _round_price(symbol, tp), notes
 
 
 class MT5Executor:
@@ -362,6 +577,161 @@ class MT5Executor:
             except Exception:
                 continue
 
+    # -------------------------------------------------
+    # BREAKEVEN STOP MANAGEMENT (post-entry)
+    # -------------------------------------------------
+
+    def manage_breakeven_stop(
+        self,
+        *,
+        trigger_r: float = 0.6,
+        offset_points: int = 10,
+        offset_spread_mult: float = 1.0,
+        min_move_points: int = 30,
+        strategy: str | None = None,
+        magic: int = 2601,
+    ):
+        """
+        Moves SL to (near) entry once trade has moved favorably by trigger_r * R.
+        Only moves SL in the profitable direction (never loosens).
+        """
+        try:
+            positions = mt5.positions_get(symbol=self.symbol)
+        except Exception:
+            return
+        if not positions:
+            return
+
+        info = None
+        try:
+            info = mt5.symbol_info(self.symbol)
+        except Exception:
+            info = None
+        if info is None:
+            return
+
+        point = float(getattr(info, "point", 0.0) or 0.0)
+        if point <= 0:
+            point = float(getattr(info, "trade_tick_size", 0.0) or 0.01)
+
+        tick = mt5.symbol_info_tick(self.symbol)
+        if not tick:
+            return
+        bid = float(getattr(tick, "bid", 0.0) or 0.0)
+        ask = float(getattr(tick, "ask", 0.0) or 0.0)
+        if bid <= 0 or ask <= 0:
+            return
+
+        spread = max(0.0, ask - bid)
+
+        try:
+            trigger_r = float(trigger_r)
+        except Exception:
+            trigger_r = 0.6
+        trigger_r = max(0.1, min(5.0, trigger_r))
+
+        try:
+            offset_points = int(offset_points)
+        except Exception:
+            offset_points = 10
+        offset_points = max(0, min(5000, offset_points))
+
+        try:
+            min_move_points = int(min_move_points)
+        except Exception:
+            min_move_points = 30
+        min_move_points = max(0, min(50000, min_move_points))
+
+        try:
+            offset_spread_mult = float(offset_spread_mult)
+        except Exception:
+            offset_spread_mult = 1.0
+        offset_spread_mult = max(0.0, min(10.0, offset_spread_mult))
+
+        # Broker stop level (distance from current price)
+        stops_level_points = int(getattr(info, "trade_stops_level", 0) or 0)
+        min_stop_dist = float(stops_level_points) * point
+
+        offset_price = max(offset_points * point, spread * offset_spread_mult)
+
+        for p in positions:
+            if getattr(p, "magic", None) != magic:
+                continue
+
+            p_strategy = _parse_strategy_from_comment(getattr(p, "comment", None))
+            if strategy and p_strategy != strategy:
+                continue
+
+            sl = float(getattr(p, "sl", 0.0) or 0.0)
+            tp = float(getattr(p, "tp", 0.0) or 0.0)
+            entry = float(getattr(p, "price_open", 0.0) or 0.0)
+            ticket = getattr(p, "ticket", None)
+            if ticket is None or entry <= 0:
+                continue
+
+            ptype = getattr(p, "type", None)
+            is_buy = (ptype == mt5.POSITION_TYPE_BUY) if hasattr(mt5, "POSITION_TYPE_BUY") else (ptype == 0)
+
+            # Need an initial SL on the loss side to define R and to avoid repeated BE moves
+            if sl <= 0:
+                continue
+            if is_buy and sl >= entry:
+                continue
+            if (not is_buy) and sl <= entry:
+                continue
+
+            risk_dist = abs(entry - sl)
+            if risk_dist <= 0:
+                continue
+
+            move = (bid - entry) if is_buy else (entry - ask)
+            if move <= 0:
+                continue
+
+            # Extra minimum move
+            if min_move_points > 0 and (move / point) < float(min_move_points):
+                continue
+
+            if move < (risk_dist * trigger_r):
+                continue
+
+            new_sl = (entry + offset_price) if is_buy else (entry - offset_price)
+
+            # Only tighten
+            if is_buy:
+                if new_sl <= sl:
+                    continue
+                # Ensure SL is below current bid by stop distance
+                if min_stop_dist > 0 and (bid - new_sl) < (min_stop_dist * 1.05):
+                    continue
+            else:
+                if new_sl >= sl:
+                    continue
+                if min_stop_dist > 0 and (new_sl - ask) < (min_stop_dist * 1.05):
+                    continue
+
+            new_sl = _round_price(self.symbol, new_sl)
+
+            req = {
+                "action": mt5.TRADE_ACTION_SLTP,
+                "position": int(ticket),
+                "symbol": self.symbol,
+                "sl": float(new_sl),
+                "tp": float(tp) if tp > 0 else 0.0,
+                "magic": magic,
+                "comment": "pb|be",
+            }
+
+            try:
+                res = mt5.order_send(req)
+                if res and getattr(res, "retcode", None) == mt5.TRADE_RETCODE_DONE:
+                    self.logger.info(
+                        f"BREAKEVEN SL UPDATED | {self.symbol} | strat={p_strategy} | SL={new_sl:.3f} | "
+                        f"trigger_r={trigger_r:.2f}"
+                    )
+            except Exception:
+                continue
+
     def _risk_to_lot(self, risk_pct, sl_ticks=None, strategy="unknown"):
         """
         Calculate lot size based on actual SL distance.
@@ -539,15 +909,30 @@ class MT5Executor:
         strategy_name = signal.get("strategy", "unknown")
         self.logger.info(f"[EXECUTE START] {strategy_name} {signal['side']}")
         
-        tick = mt5.symbol_info_tick(self.symbol)
-        if not tick:
-            self.logger.error("NO TICK DATA")
+        # Parse raw levels once; we will re-normalize per attempt (price can change).
+        side = str(signal.get("side", "")).lower()
+        if side not in {"buy", "sell"}:
+            self.logger.error("INVALID SIDE IN SIGNAL")
             return None
 
-        if signal["side"] == "buy":
-            price = tick.ask
-        else:
-            price = tick.bid
+        try:
+            raw_sl = float(signal.get("sl"))
+            raw_tp = float(signal.get("tp"))
+        except Exception:
+            self.logger.error("INVALID SL/TP IN SIGNAL")
+            return None
+
+        entry_ref = signal.get("entry")
+        try:
+            entry_ref_f = float(entry_ref) if entry_ref is not None else None
+        except Exception:
+            entry_ref_f = None
+
+        min_rr = signal.get("min_rr")
+        try:
+            min_rr_f = float(min_rr) if min_rr is not None else None
+        except Exception:
+            min_rr_f = None
         
         # Calculate lot size if not explicitly provided
         if lot is None:
@@ -603,23 +988,82 @@ class MT5Executor:
         # Use compact comment to allow exposure/risk tracking from open positions.
         comment = _build_order_comment(strategy_name, risk_pct if risk_pct is not None else self.last_risk_pct)
 
+        # Prepare order request (price + sl/tp computed per attempt)
         request = {
             "action": mt5.TRADE_ACTION_DEAL,
             "symbol": self.symbol,
             "volume": lot,
             "type": order_type,
-            "price": price,
-            "sl": signal["sl"],
-            "tp": signal["tp"],
-            "deviation": 20,
+            "price": 0.0,
+            "sl": 0.0,
+            "tp": 0.0,
+            "deviation": _dynamic_deviation_points(self.symbol),
             "magic": 2601,
             "comment": comment,
             "type_time": mt5.ORDER_TIME_GTC,
             "type_filling": mt5.ORDER_FILLING_IOC,
         }
 
-        result = mt5.order_send(request)
-        self.logger.info(f"[EXECUTE] Order send result: {result}")
+        try:
+            retries = int(os.getenv("ORDER_SEND_RETRIES", "2"))
+        except Exception:
+            retries = 2
+        retries = max(0, min(5, retries))
+
+        try:
+            sleep_ms = int(os.getenv("ORDER_SEND_RETRY_SLEEP_MS", "200"))
+        except Exception:
+            sleep_ms = 200
+        sleep_ms = max(0, min(2000, sleep_ms))
+
+        result = None
+        last_level_log = None
+        for attempt in range(retries + 1):
+            tick = mt5.symbol_info_tick(self.symbol)
+            if not tick:
+                self.logger.error("NO TICK DATA")
+                return None
+
+            price = float(tick.ask) if side == "buy" else float(tick.bid)
+
+            sl_adj, tp_adj, lvl_notes = _normalize_levels_for_execution(
+                symbol=self.symbol,
+                side=side,
+                price=float(price),
+                sl=raw_sl,
+                tp=raw_tp,
+                entry_ref=entry_ref_f,
+                min_rr=min_rr_f,
+            )
+
+            request["price"] = float(price)
+            request["sl"] = float(sl_adj)
+            request["tp"] = float(tp_adj)
+            request["deviation"] = _dynamic_deviation_points(self.symbol)
+
+            # Log level adjustment only when it changes materially (avoid spam across retries)
+            lvl_log = (sl_adj, tp_adj, ",".join(lvl_notes))
+            if lvl_log != last_level_log:
+                if sl_adj != raw_sl or tp_adj != raw_tp:
+                    self.logger.info(
+                        f"LEVEL ADJUST | {signal.get('strategy','unknown')} | side={side} | "
+                        f"entry_ref={entry_ref_f} actual={float(price):.6f} | "
+                        f"sl {raw_sl:.6f}->{sl_adj:.6f} | tp {raw_tp:.6f}->{tp_adj:.6f} | notes={','.join(lvl_notes)}"
+                    )
+                last_level_log = lvl_log
+
+            result = mt5.order_send(request)
+            self.logger.info(f"[EXECUTE] Order send result (attempt {attempt+1}/{retries+1}): {result}")
+
+            if result and getattr(result, "retcode", None) == mt5.TRADE_RETCODE_DONE:
+                break
+
+            retcode = getattr(result, "retcode", None) if result else "NO_RESULT"
+            if attempt < retries and _should_retry_retcode(retcode):
+                if sleep_ms > 0:
+                    time.sleep(sleep_ms / 1000.0)
+                continue
+            break
 
         # ❌ FAILED ORDER
         if not result or result.retcode != mt5.TRADE_RETCODE_DONE:

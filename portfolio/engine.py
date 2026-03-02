@@ -46,6 +46,8 @@ class PortfolioEngine:
 
         config = load_config()
         self.scalper_cfg = config.get("scalper", {})
+        risk_cfg = config.get("risk", {})
+        self.breakeven_cfg = config.get("breakeven", {}) or {}
 
         # --------------------------------------------------
         # BUILD ONE ENGINE PER STRATEGY PER SYMBOL
@@ -65,7 +67,8 @@ class PortfolioEngine:
                         executor=executor,
                         symbol=symbol,
                         timeframe=scfg["timeframe"],
-                        candle_seconds=scfg["candle_seconds"]
+                        candle_seconds=scfg["candle_seconds"],
+                        risk_cfg=risk_cfg,
                     )
 
                     self.engines.append({
@@ -88,7 +91,8 @@ class PortfolioEngine:
                     executor=executor,
                     symbol=symbol,
                     timeframe=symbol_cfg["timeframe"],
-                    candle_seconds=symbol_cfg["candle_seconds"]
+                    candle_seconds=symbol_cfg["candle_seconds"],
+                    risk_cfg=risk_cfg,
                 )
 
                 self.engines.append({
@@ -174,6 +178,19 @@ class PortfolioEngine:
                             trailing_atr_multiplier=float(scalper_cfg.get("trailing_atr_multiplier", 1.0)),
                             trailing_step=float(scalper_cfg.get("trailing_step", 0.5)),
                             strategy="xau_scalper",
+                        )
+
+                    # ------------------------------
+                    # Post-entry breakeven stop (all strategies, configurable)
+                    # ------------------------------
+                    be_cfg = getattr(self, "breakeven_cfg", {}) or {}
+                    if bool(be_cfg.get("enabled", True)):
+                        engine.executor.manage_breakeven_stop(
+                            trigger_r=float(be_cfg.get("trigger_r", 0.6)),
+                            offset_points=int(be_cfg.get("offset_points", 10)),
+                            offset_spread_mult=float(be_cfg.get("offset_spread_mult", 1.0)),
+                            min_move_points=int(be_cfg.get("min_move_points", 30)),
+                            strategy=strategy_name,
                         )
 
                     # ------------------------------

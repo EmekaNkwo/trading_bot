@@ -345,7 +345,13 @@ def get_next_event_info(mode):
 
 def main():
 
-    risk = RiskManager()
+    cfg = load_config() or {}
+    r = cfg.get("risk", {}) or {}
+    risk = RiskManager(
+        max_trades_per_day=int(r.get("max_trades_per_day", 10)),
+        max_daily_loss=float(r.get("max_daily_loss", 0.02)),
+        max_open_positions=int(r.get("max_open_positions", 1)),
+    )
     orchestrator = BotOrchestrator(risk)
     heartbeat = Heartbeat(interval_minutes=30)
 

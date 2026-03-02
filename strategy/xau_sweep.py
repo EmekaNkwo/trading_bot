@@ -71,6 +71,10 @@ class XAUSweepStrategy:
         self.tp_fade_atr = float(cfg.get("tp_fade_atr", 0.60))
         self.tp_cont_atr = float(cfg.get("tp_cont_atr", 0.80))
 
+        # Minimum R:R enforcement (executor will push TP outward if needed)
+        self.min_rr_fade = float(cfg.get("min_rr_fade", 1.15))
+        self.min_rr_cont = float(cfg.get("min_rr_cont", 1.25))
+
         self.min_bars_between_signals = int(cfg.get("min_bars_between_signals", 2))
         self.cooldown_minutes = int(cfg.get("cooldown_minutes", 30))
         self.band_key_step = float(cfg.get("band_key_step", 0.5))
@@ -311,7 +315,14 @@ class XAUSweepStrategy:
                         self.logger.info(
                             f"SWEEP FADE BUY | {now} | Band={p.band.center:.3f} | ADX={cur_adx:.1f} RSI={cur_rsi:.1f}"
                         )
-                        return {"side": "buy", "sl": round(sl, 3), "tp": round(tp, 3), "strategy": "xau_sweep"}
+                        return {
+                            "side": "buy",
+                            "sl": round(sl, 3),
+                            "tp": round(tp, 3),
+                            "strategy": "xau_sweep",
+                            "entry": float(last.close),
+                            "min_rr": float(self.min_rr_fade),
+                        }
 
                 # CONTINUATION: accept below band and expand
                 accepted = float(last.close) <= float(p.band.lo) - float(p.sweep_min)
@@ -332,7 +343,14 @@ class XAUSweepStrategy:
                     self.logger.info(
                         f"SWEEP CONT SELL | {now} | Band={p.band.center:.3f} | ADX={cur_adx:.1f} RSI={cur_rsi:.1f}"
                     )
-                    return {"side": "sell", "sl": round(sl, 3), "tp": round(tp, 3), "strategy": "xau_sweep"}
+                    return {
+                        "side": "sell",
+                        "sl": round(sl, 3),
+                        "tp": round(tp, 3),
+                        "strategy": "xau_sweep",
+                        "entry": float(last.close),
+                        "min_rr": float(self.min_rr_cont),
+                    }
 
             else:  # p.direction == "up"
                 reclaimed = float(last.close) <= float(p.band.center)
@@ -351,7 +369,14 @@ class XAUSweepStrategy:
                         self.logger.info(
                             f"SWEEP FADE SELL | {now} | Band={p.band.center:.3f} | ADX={cur_adx:.1f} RSI={cur_rsi:.1f}"
                         )
-                        return {"side": "sell", "sl": round(sl, 3), "tp": round(tp, 3), "strategy": "xau_sweep"}
+                        return {
+                            "side": "sell",
+                            "sl": round(sl, 3),
+                            "tp": round(tp, 3),
+                            "strategy": "xau_sweep",
+                            "entry": float(last.close),
+                            "min_rr": float(self.min_rr_fade),
+                        }
 
                 accepted = float(last.close) >= float(p.band.hi) + float(p.sweep_min)
                 body = abs(float(last.close) - float(last.open))
@@ -371,7 +396,14 @@ class XAUSweepStrategy:
                     self.logger.info(
                         f"SWEEP CONT BUY | {now} | Band={p.band.center:.3f} | ADX={cur_adx:.1f} RSI={cur_rsi:.1f}"
                     )
-                    return {"side": "buy", "sl": round(sl, 3), "tp": round(tp, 3), "strategy": "xau_sweep"}
+                    return {
+                        "side": "buy",
+                        "sl": round(sl, 3),
+                        "tp": round(tp, 3),
+                        "strategy": "xau_sweep",
+                        "entry": float(last.close),
+                        "min_rr": float(self.min_rr_cont),
+                    }
 
             return None
 

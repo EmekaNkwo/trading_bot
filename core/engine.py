@@ -3,6 +3,7 @@ from core.risk import RiskManager
 from utils.telegram import TelegramNotifier
 from config.secrets import get_telegram_credentials
 from utils.logger import setup_logger, log_separator
+from config.loader import load_config
 
 
 class TradingEngine:
@@ -14,7 +15,8 @@ class TradingEngine:
         executor,
         symbol,
         timeframe,
-        candle_seconds
+        candle_seconds,
+        risk_cfg=None,
     ):
         self.broker = broker
         self.strategy = strategy
@@ -28,10 +30,28 @@ class TradingEngine:
         self.timeframe = timeframe
         self.candle_seconds = candle_seconds
 
+        if risk_cfg is None:
+            try:
+                risk_cfg = (load_config() or {}).get("risk", {})
+            except Exception:
+                risk_cfg = {}
+
+        def _to_int(v, default):
+            try:
+                return int(v)
+            except Exception:
+                return int(default)
+
+        def _to_float(v, default):
+            try:
+                return float(v)
+            except Exception:
+                return float(default)
+
         self.risk = RiskManager(
-            max_trades_per_day=10,
-            max_daily_loss=0.02,
-            max_open_positions=1
+            max_trades_per_day=_to_int((risk_cfg or {}).get("max_trades_per_day", 10), 10),
+            max_daily_loss=_to_float((risk_cfg or {}).get("max_daily_loss", 0.02), 0.02),
+            max_open_positions=_to_int((risk_cfg or {}).get("max_open_positions", 1), 1),
         )
 
         self.last_candle_time = None

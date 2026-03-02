@@ -44,6 +44,9 @@ class XAURegimeStrategy:
         self.sl_atr_meanrev = float(cfg.get("sl_atr_meanrev", 1.3))
         self.tp_atr_meanrev = float(cfg.get("tp_atr_meanrev", 1.3))
 
+        # Minimum R:R enforcement (executor will push TP outward if needed)
+        self.min_rr = float(cfg.get("min_rr", 1.2))
+
         self.min_bars_between_signals = int(cfg.get("min_bars_between_signals", 3))
         self.block_asian_session = bool(cfg.get("block_asian_session", True))
 
@@ -164,13 +167,27 @@ class XAURegimeStrategy:
                 sl = float(last.close) - (atr_val * self.sl_atr_breakout)
                 tp = float(last.close) + (atr_val * self.tp_atr_breakout)
                 self._last_signal_bar = candle_time
-                return {"side": "buy", "sl": round(sl, 3), "tp": round(tp, 3), "strategy": "xau_regime"}
+                return {
+                    "side": "buy",
+                    "sl": round(sl, 3),
+                    "tp": round(tp, 3),
+                    "strategy": "xau_regime",
+                    "entry": float(last.close),
+                    "min_rr": float(self.min_rr),
+                }
 
             if float(last.close) < lo and vol_spike:
                 sl = float(last.close) + (atr_val * self.sl_atr_breakout)
                 tp = float(last.close) - (atr_val * self.tp_atr_breakout)
                 self._last_signal_bar = candle_time
-                return {"side": "sell", "sl": round(sl, 3), "tp": round(tp, 3), "strategy": "xau_regime"}
+                return {
+                    "side": "sell",
+                    "sl": round(sl, 3),
+                    "tp": round(tp, 3),
+                    "strategy": "xau_regime",
+                    "entry": float(last.close),
+                    "min_rr": float(self.min_rr),
+                }
 
             return None
 
@@ -190,14 +207,28 @@ class XAURegimeStrategy:
                     sl = float(last.close) - (atr_val * self.sl_atr_trend)
                     tp = float(last.close) + (atr_val * self.tp_atr_trend)
                     self._last_signal_bar = candle_time
-                    return {"side": "buy", "sl": round(sl, 3), "tp": round(tp, 3), "strategy": "xau_regime"}
+                    return {
+                        "side": "buy",
+                        "sl": round(sl, 3),
+                        "tp": round(tp, 3),
+                        "strategy": "xau_regime",
+                        "entry": float(last.close),
+                        "min_rr": float(self.min_rr),
+                    }
 
             if downtrend:
                 if float(last.high) >= fast and float(last.close) < fast and float(prev.close) <= fast:
                     sl = float(last.close) + (atr_val * self.sl_atr_trend)
                     tp = float(last.close) - (atr_val * self.tp_atr_trend)
                     self._last_signal_bar = candle_time
-                    return {"side": "sell", "sl": round(sl, 3), "tp": round(tp, 3), "strategy": "xau_regime"}
+                    return {
+                        "side": "sell",
+                        "sl": round(sl, 3),
+                        "tp": round(tp, 3),
+                        "strategy": "xau_regime",
+                        "entry": float(last.close),
+                        "min_rr": float(self.min_rr),
+                    }
 
             return None
 
@@ -214,13 +245,27 @@ class XAURegimeStrategy:
             sl = float(last.close) - (atr_val * self.sl_atr_meanrev)
             tp = float(last.close) + (atr_val * self.tp_atr_meanrev)
             self._last_signal_bar = candle_time
-            return {"side": "buy", "sl": round(sl, 3), "tp": round(tp, 3), "strategy": "xau_regime"}
+            return {
+                "side": "buy",
+                "sl": round(sl, 3),
+                "tp": round(tp, 3),
+                "strategy": "xau_regime",
+                "entry": float(last.close),
+                "min_rr": float(self.min_rr),
+            }
 
         if float(last.close) > up and cur_rsi >= self.mr_rsi_sell:
             sl = float(last.close) + (atr_val * self.sl_atr_meanrev)
             tp = float(last.close) - (atr_val * self.tp_atr_meanrev)
             self._last_signal_bar = candle_time
-            return {"side": "sell", "sl": round(sl, 3), "tp": round(tp, 3), "strategy": "xau_regime"}
+            return {
+                "side": "sell",
+                "sl": round(sl, 3),
+                "tp": round(tp, 3),
+                "strategy": "xau_regime",
+                "entry": float(last.close),
+                "min_rr": float(self.min_rr),
+            }
 
         return None
 
