@@ -934,6 +934,13 @@ class MT5Executor:
         except Exception:
             min_rr_f = None
         
+        # We need a reference price for lot sizing/logs (and for distance calcs).
+        tick0 = mt5.symbol_info_tick(self.symbol)
+        if not tick0:
+            self.logger.error("NO TICK DATA")
+            return None
+        price0 = float(tick0.ask) if side == "buy" else float(tick0.bid)
+
         # Calculate lot size if not explicitly provided
         if lot is None:
             # Get symbol info for tick size
@@ -947,7 +954,7 @@ class MT5Executor:
             # Calculate SL distance in ticks
             sl_price = signal.get("sl")
             if sl_price:
-                sl_distance = abs(price - sl_price)
+                sl_distance = abs(price0 - float(sl_price))
                 sl_ticks = int(sl_distance / tick_size)
             else:
                 sl_ticks = None
@@ -960,7 +967,7 @@ class MT5Executor:
             lot = self._risk_to_lot(calc_risk, sl_ticks, strategy_name)
             
             self.logger.info(
-                f"DYNAMIC LOT CALC | Strategy: {strategy_name} | Price: {price} | SL: {sl_price} | "
+                f"DYNAMIC LOT CALC | Strategy: {strategy_name} | Price: {price0} | SL: {sl_price} | "
                 f"Distance: {sl_distance if sl_price else 'N/A'} | Ticks: {sl_ticks} | Lot: {lot}"
             )
 
@@ -1018,6 +1025,8 @@ class MT5Executor:
 
         result = None
         last_level_log = None
+        last_sl_adj = None
+        last_tp_adj = None
         for attempt in range(retries + 1):
             tick = mt5.symbol_info_tick(self.symbol)
             if not tick:
@@ -1040,6 +1049,8 @@ class MT5Executor:
             request["sl"] = float(sl_adj)
             request["tp"] = float(tp_adj)
             request["deviation"] = _dynamic_deviation_points(self.symbol)
+            last_sl_adj = float(sl_adj)
+            last_tp_adj = float(tp_adj)
 
             # Log level adjustment only when it changes materially (avoid spam across retries)
             lvl_log = (sl_adj, tp_adj, ",".join(lvl_notes))
@@ -1077,8 +1088,8 @@ class MT5Executor:
                 side=str(signal.get("side", "")).lower(),
                 lot=float(lot) if lot is not None else None,
                 price=float(price) if price is not None else None,
-                sl=float(signal.get("sl")) if signal.get("sl") is not None else None,
-                tp=float(signal.get("tp")) if signal.get("tp") is not None else None,
+                sl=float(last_sl_adj) if last_sl_adj is not None else (float(signal.get("sl")) if signal.get("sl") is not None else None),
+                tp=float(last_tp_adj) if last_tp_adj is not None else (float(signal.get("tp")) if signal.get("tp") is not None else None),
                 deviation_points=int(request.get("deviation", 0)) if isinstance(request.get("deviation", 0), int) else None,
                 retcode=retcode,
                 comment=str(comment) if comment is not None else None,
