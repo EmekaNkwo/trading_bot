@@ -10,6 +10,7 @@ from portfolio.state import PortfolioState
 from core.broker import MT5Broker
 from core.execution import MT5Executor
 from core.engine import TradingEngine
+from core.market_state import MarketStateStore
 
 from config.loader import load_config
 from strategy.factory import build_strategy
@@ -48,6 +49,7 @@ class PortfolioEngine:
         self.scalper_cfg = config.get("scalper", {})
         risk_cfg = config.get("risk", {})
         self.breakeven_cfg = config.get("breakeven", {}) or {}
+        self.market_state = MarketStateStore(config)
 
         # --------------------------------------------------
         # BUILD ONE ENGINE PER STRATEGY PER SYMBOL
@@ -58,7 +60,7 @@ class PortfolioEngine:
             if "strategies" in symbol_cfg:
                 strategies_cfg = symbol_cfg["strategies"]
                 for strategy_name, scfg in strategies_cfg.items():
-                    strategy = build_strategy(strategy_name, config)
+                    strategy = build_strategy(strategy_name, config, symbol=symbol)
                     executor = MT5Executor(symbol=symbol)
 
                     engine = TradingEngine(
@@ -69,6 +71,7 @@ class PortfolioEngine:
                         timeframe=scfg["timeframe"],
                         candle_seconds=scfg["candle_seconds"],
                         risk_cfg=risk_cfg,
+                        market_state=self.market_state,
                     )
 
                     self.engines.append({
@@ -82,7 +85,7 @@ class PortfolioEngine:
             else:
                 # Single strategy per symbol
                 strategy_name = symbol_cfg["strategy"]
-                strategy = build_strategy(strategy_name, config)
+                strategy = build_strategy(strategy_name, config, symbol=symbol)
                 executor = MT5Executor(symbol=symbol)
 
                 engine = TradingEngine(
@@ -93,6 +96,7 @@ class PortfolioEngine:
                     timeframe=symbol_cfg["timeframe"],
                     candle_seconds=symbol_cfg["candle_seconds"],
                     risk_cfg=risk_cfg,
+                    market_state=self.market_state,
                 )
 
                 self.engines.append({

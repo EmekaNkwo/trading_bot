@@ -58,6 +58,9 @@ regime:
   min_rr: 1.2
   min_bars_between_signals: 3
   block_asian_session: true
+  block_on_recent_sweep: true
+  recent_sweep_block_minutes: 15
+  recent_sweep_log_details: true
 
 sweep:
   # Liquidity sweep dual-mode strategy (fade vs continuation)
@@ -98,6 +101,38 @@ sweep:
   cooldown_minutes: 10
   band_key_step: 0.5
 
+market_state:
+  atr_period: 14
+  atr_median_lookback: 120
+  high_vol_mult: 1.35
+  low_vol_mult: 0.75
+  sweep_lookback_bars: 48
+  sweep_atr_mult: 0.20
+  london_open_hour_utc: 8
+  opening_range_minutes: 30
+
+liquidity_reclaim:
+  atr_period: 14
+  recent_sweep_minutes: 20
+  reclaim_buffer_atr: 0.05
+  wick_reject_ratio: 0.45
+  sl_buffer_atr: 0.20
+  rr_target: 1.60
+  min_bars_between_signals: 2
+  require_active_session: true
+  block_high_vol: true
+
+opening_range_displacement:
+  atr_period: 14
+  break_buffer_atr: 0.08
+  min_body_atr: 0.45
+  max_extension_atr: 0.80
+  sl_buffer_atr: 0.25
+  rr_target: 1.70
+  require_active_session: true
+  require_non_low_vol: true
+  min_bars_between_signals: 2
+
 risk:
   max_trades_per_day: 30
   max_daily_loss: 0.02
@@ -127,7 +162,7 @@ session:
 walkforward:
     # Make walk-forward produce enough trades to be meaningful.
     timeframe: M5
-    strategy: xau_sweep
+    strategy: xau_liquidity_reclaim
     train_bars: 6000
     test_bars: 2000
     step_bars: 2000

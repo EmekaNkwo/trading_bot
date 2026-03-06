@@ -17,6 +17,7 @@ class TradingEngine:
         timeframe,
         candle_seconds,
         risk_cfg=None,
+        market_state=None,
     ):
         self.broker = broker
         self.strategy = strategy
@@ -29,6 +30,10 @@ class TradingEngine:
 
         self.timeframe = timeframe
         self.candle_seconds = candle_seconds
+        self.market_state = market_state
+
+        if self.market_state is not None and hasattr(self.strategy, "bind_market_state"):
+            self.strategy.bind_market_state(self.market_state)
 
         if risk_cfg is None:
             try:
@@ -79,6 +84,12 @@ class TradingEngine:
             return
 
         self.last_candle_time = candle_time
+
+        if self.market_state is not None:
+            try:
+                self.market_state.update(symbol=self.symbol, timeframe=self.timeframe, df=df)
+            except Exception as e:
+                self.logger.warning(f"MARKET STATE UPDATE FAILED | {self.symbol} | {e}")
 
         signal = self.strategy.on_candle(df)
 

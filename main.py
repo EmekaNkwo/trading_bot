@@ -230,7 +230,7 @@ def run_walkforward_module():
         strat_name = str(wf_cfg.get("strategy", "xau_sweep"))
         results = wf.run(
             df,
-            strategy_factory=lambda: build_strategy(strat_name, config)
+            strategy_factory=lambda: build_strategy(strat_name, config, symbol=symbol)
         )
     finally:
         _restore_console_log_level(changed)

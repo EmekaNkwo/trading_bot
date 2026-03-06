@@ -5,21 +5,31 @@ PORTFOLIO = {
     "symbols": {
         "XAUUSDm": {
             "strategies": {
-                # Adaptive regime strategy (enabled)
-                "xau_regime": {
+                # v2: liquidity reclaim around recent sweep context
+                "xau_liquidity_reclaim": {
                     "timeframe": "M5",
                     "candle_seconds": 300,
                     "risk": 0.005
                 },
 
-                # Liquidity sweep dual-mode strategy (enabled, conservative)
-                "xau_sweep": {
+                # v2: opening-range displacement breakout
+                "xau_opening_range_displacement": {
                     "timeframe": "M5",
                     "candle_seconds": 300,
                     "risk": 0.005
                 },
 
                 # Previous strategies (paused)
+                # "xau_regime": {
+                #     "timeframe": "M5",
+                #     "candle_seconds": 300,
+                #     "risk": 0.005
+                # },
+                # "xau_sweep": {
+                #     "timeframe": "M5",
+                #     "candle_seconds": 300,
+                #     "risk": 0.005
+                # },
                 # "xau_trend": {
                 #     "timeframe": "M15",
                 #     "candle_seconds": 900,

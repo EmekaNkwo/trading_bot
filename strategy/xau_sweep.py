@@ -7,6 +7,7 @@ import pandas as pd
 
 from utils.indicators import atr, adx, rsi
 from utils.logger import setup_logger
+from utils.sweep_context import SWEEP_EVENTS
 
 
 @dataclass(frozen=True)
@@ -80,10 +81,14 @@ class XAUSweepStrategy:
         self.band_key_step = float(cfg.get("band_key_step", 0.5))
 
         self.logger = setup_logger()
+        self.symbol = str(cfg.get("symbol", "XAUUSDm"))
 
         self._pending: Optional[PendingSweep] = None
         self._last_signal_at: Optional[pd.Timestamp] = None
         self._band_cooldown: dict[float, pd.Timestamp] = {}
+
+    def bind_symbol(self, symbol: str) -> None:
+        self.symbol = str(symbol)
 
     # -------------------------
     # Liquidity level building
@@ -103,6 +108,13 @@ class XAUSweepStrategy:
 
     def _record_band_trade(self, band: LiquidityBand, now: pd.Timestamp) -> None:
         self._band_cooldown[self._band_key(band)] = now
+
+    def _reward_to_risk_ok(self, side: str, entry: float, sl: float, tp: float, min_rr: float) -> bool:
+        risk = (entry - sl) if side == "buy" else (sl - entry)
+        reward = (tp - entry) if side == "buy" else (entry - tp)
+        if risk <= 0 or reward <= 0:
+            return False
+        return (reward / risk) >= float(min_rr)
 
     def _pivot_levels(self, df: pd.DataFrame) -> list[float]:
         sub = df.tail(self.swing_lookback_bars)
@@ -309,6 +321,14 @@ class XAUSweepStrategy:
                         nxt = self._next_band_above(bands, entry)
                         tp = min(tp_atr, float(nxt.center)) if (nxt and nxt.center > entry) else tp_atr
 
+                        if not self._reward_to_risk_ok("buy", entry, sl, tp, self.min_rr_fade):
+                            self.logger.info(
+                                f"SWEEP FADE BUY SKIP | {now} | Band={p.band.center:.3f} | "
+                                f"RR too small for capped target | Entry={entry:.3f} SL={sl:.3f} TP={tp:.3f}"
+                            )
+                            self._pending = None
+                            return None
+
                         self._pending = None
                         self._last_signal_at = now
                         self._record_band_trade(p.band, now)
@@ -362,6 +382,14 @@ class XAUSweepStrategy:
                         tp_atr = entry - (atr_val * self.tp_fade_atr)
                         nxt = self._next_band_below(bands, entry)
                         tp = max(tp_atr, float(nxt.center)) if (nxt and nxt.center < entry) else tp_atr
+
+                        if not self._reward_to_risk_ok("sell", entry, sl, tp, self.min_rr_fade):
+                            self.logger.info(
+                                f"SWEEP FADE SELL SKIP | {now} | Band={p.band.center:.3f} | "
+                                f"RR too small for capped target | Entry={entry:.3f} SL={sl:.3f} TP={tp:.3f}"
+                            )
+                            self._pending = None
+                            return None
 
                         self._pending = None
                         self._last_signal_at = now
@@ -421,6 +449,13 @@ class XAUSweepStrategy:
 
         # Down-sweep event
         if down_band and (low < (down_band.lo - sweep_min)) and (not self._in_band_cooldown(down_band, now)):
+            SWEEP_EVENTS.record(
+                symbol=self.symbol,
+                direction="down",
+                timestamp=now,
+                band_center=down_band.center,
+                extreme=low,
+            )
             self._pending = PendingSweep(
                 direction="down",
                 band=down_band,
@@ -436,6 +471,13 @@ class XAUSweepStrategy:
 
         # Up-sweep event
         if up_band and (high > (up_band.hi + sweep_min)) and (not self._in_band_cooldown(up_band, now)):
+            SWEEP_EVENTS.record(
+                symbol=self.symbol,
+                direction="up",
+                timestamp=now,
+                band_center=up_band.center,
+                extreme=high,
+            )
             self._pending = PendingSweep(
                 direction="up",
                 band=up_band,

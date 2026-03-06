@@ -3,6 +3,7 @@ import pandas as pd
 from utils.indicators import atr, adx, rsi
 from utils.time_utils import SessionFilter
 from utils.logger import setup_logger
+from utils.sweep_context import SWEEP_EVENTS
 
 
 class XAURegimeStrategy:
@@ -49,11 +50,18 @@ class XAURegimeStrategy:
 
         self.min_bars_between_signals = int(cfg.get("min_bars_between_signals", 3))
         self.block_asian_session = bool(cfg.get("block_asian_session", True))
+        self.block_on_recent_sweep = bool(cfg.get("block_on_recent_sweep", True))
+        self.recent_sweep_block_minutes = int(cfg.get("recent_sweep_block_minutes", 15))
+        self.recent_sweep_log_details = bool(cfg.get("recent_sweep_log_details", True))
 
         self.session = SessionFilter()
         self.logger = setup_logger()
+        self.symbol = str(cfg.get("symbol", "XAUUSDm"))
 
         self._last_signal_bar = None
+
+    def bind_symbol(self, symbol: str) -> None:
+        self.symbol = str(symbol)
 
     def _is_asian_session(self, candle_time):
         hour = candle_time.hour if hasattr(candle_time, "hour") else candle_time.to_pydatetime().hour
@@ -76,6 +84,38 @@ class XAURegimeStrategy:
         except Exception:
             bars_since = None
         return True
+
+    def _blocked_by_recent_sweep(self, candle_time, side: str) -> tuple[bool, str | None]:
+        if not self.block_on_recent_sweep:
+            return False, None
+
+        event = SWEEP_EVENTS.get(self.symbol)
+        if event is None:
+            return False, None
+
+        wanted_direction = "up" if side == "buy" else "down"
+        if event.direction != wanted_direction:
+            return False, None
+
+        event_time = pd.Timestamp(event.timestamp)
+        now_time = pd.Timestamp(candle_time)
+        age = now_time - event_time
+        if age < pd.Timedelta(0):
+            return False, None
+
+        max_age = pd.Timedelta(minutes=max(1, self.recent_sweep_block_minutes))
+        if age > max_age:
+            return False, None
+
+        if self.recent_sweep_log_details:
+            reason = (
+                f"recent {event.direction} sweep at {event_time} "
+                f"(age={age}, band={event.band_center:.3f}, extreme={event.extreme:.3f})"
+            )
+        else:
+            reason = f"recent {event.direction} sweep at {event_time}"
+
+        return True, reason
 
     def on_candle(self, df: pd.DataFrame):
         if df is None or df.empty:
@@ -164,6 +204,10 @@ class XAURegimeStrategy:
             lo = float(lower.iloc[-1])
 
             if float(last.close) > up and vol_spike:
+                blocked, reason = self._blocked_by_recent_sweep(candle_time, "buy")
+                if blocked:
+                    self.logger.info(f"REGIME BUY SKIP | {candle_time} | breakout blocked by {reason}")
+                    return None
                 sl = float(last.close) - (atr_val * self.sl_atr_breakout)
                 tp = float(last.close) + (atr_val * self.tp_atr_breakout)
                 self._last_signal_bar = candle_time
@@ -177,6 +221,10 @@ class XAURegimeStrategy:
                 }
 
             if float(last.close) < lo and vol_spike:
+                blocked, reason = self._blocked_by_recent_sweep(candle_time, "sell")
+                if blocked:
+                    self.logger.info(f"REGIME SELL SKIP | {candle_time} | breakout blocked by {reason}")
+                    return None
                 sl = float(last.close) + (atr_val * self.sl_atr_breakout)
                 tp = float(last.close) - (atr_val * self.tp_atr_breakout)
                 self._last_signal_bar = candle_time
@@ -204,6 +252,10 @@ class XAURegimeStrategy:
             if uptrend:
                 # Touch-and-bounce off fast EMA
                 if float(last.low) <= fast and float(last.close) > fast and float(prev.close) >= fast:
+                    blocked, reason = self._blocked_by_recent_sweep(candle_time, "buy")
+                    if blocked:
+                        self.logger.info(f"REGIME BUY SKIP | {candle_time} | trend blocked by {reason}")
+                        return None
                     sl = float(last.close) - (atr_val * self.sl_atr_trend)
                     tp = float(last.close) + (atr_val * self.tp_atr_trend)
                     self._last_signal_bar = candle_time
@@ -218,6 +270,10 @@ class XAURegimeStrategy:
 
             if downtrend:
                 if float(last.high) >= fast and float(last.close) < fast and float(prev.close) <= fast:
+                    blocked, reason = self._blocked_by_recent_sweep(candle_time, "sell")
+                    if blocked:
+                        self.logger.info(f"REGIME SELL SKIP | {candle_time} | trend blocked by {reason}")
+                        return None
                     sl = float(last.close) + (atr_val * self.sl_atr_trend)
                     tp = float(last.close) - (atr_val * self.tp_atr_trend)
                     self._last_signal_bar = candle_time
@@ -242,6 +298,10 @@ class XAURegimeStrategy:
         lo = float(lower.iloc[-1])
 
         if float(last.close) < lo and cur_rsi <= self.mr_rsi_buy:
+            blocked, reason = self._blocked_by_recent_sweep(candle_time, "buy")
+            if blocked:
+                self.logger.info(f"REGIME BUY SKIP | {candle_time} | meanrev blocked by {reason}")
+                return None
             sl = float(last.close) - (atr_val * self.sl_atr_meanrev)
             tp = float(last.close) + (atr_val * self.tp_atr_meanrev)
             self._last_signal_bar = candle_time
@@ -255,6 +315,10 @@ class XAURegimeStrategy:
             }
 
         if float(last.close) > up and cur_rsi >= self.mr_rsi_sell:
+            blocked, reason = self._blocked_by_recent_sweep(candle_time, "sell")
+            if blocked:
+                self.logger.info(f"REGIME SELL SKIP | {candle_time} | meanrev blocked by {reason}")
+                return None
             sl = float(last.close) + (atr_val * self.sl_atr_meanrev)
             tp = float(last.close) - (atr_val * self.tp_atr_meanrev)
             self._last_signal_bar = candle_time

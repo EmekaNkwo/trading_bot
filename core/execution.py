@@ -393,6 +393,49 @@ def _normalize_levels_for_execution(
     return _round_price(symbol, sl), _round_price(symbol, tp), notes
 
 
+def _entry_drift_too_large(
+    *,
+    side: str,
+    entry_ref: float | None,
+    actual_price: float,
+    raw_sl: float,
+) -> tuple[bool, str | None]:
+    if entry_ref is None:
+        return False, None
+
+    try:
+        entry_ref_f = float(entry_ref)
+        actual_f = float(actual_price)
+        raw_sl_f = float(raw_sl)
+    except Exception:
+        return False, None
+
+    planned_risk = abs(entry_ref_f - raw_sl_f)
+    drift = abs(actual_f - entry_ref_f)
+    if planned_risk <= 0 or drift <= 0:
+        return False, None
+
+    try:
+        max_drift_r = float(os.getenv("MAX_ENTRY_DRIFT_R", "0.35"))
+    except Exception:
+        max_drift_r = 0.35
+
+    max_drift_r = max(0.05, min(2.0, max_drift_r))
+    drift_r = drift / planned_risk
+
+    moved_against_signal = (
+        (side == "buy" and actual_f > entry_ref_f) or
+        (side == "sell" and actual_f < entry_ref_f)
+    )
+    if moved_against_signal and drift_r > max_drift_r:
+        return True, (
+            f"Entry drift too large: ref={entry_ref_f:.3f} actual={actual_f:.3f} "
+            f"drift={drift:.3f} ({drift_r:.2f}R > {max_drift_r:.2f}R)"
+        )
+
+    return False, None
+
+
 class MT5Executor:
 
     def __init__(self, symbol):
@@ -781,8 +824,35 @@ class MT5Executor:
             actual_sl_ticks = default_sl_ticks
 
         # Calculate lot size: risk_amount / (sl_ticks * tick_value)
-        lot = risk_amount / (actual_sl_ticks * tick_value)
-        lot = max(min_lot, lot)
+        raw_lot = risk_amount / (actual_sl_ticks * tick_value)
+
+        # If broker min lot is larger than the risk-based lot, we may exceed intended risk.
+        if raw_lot < min_lot:
+            implied_risk = float(min_lot) * float(actual_sl_ticks) * float(tick_value)
+            implied_mult = (implied_risk / float(risk_amount)) if float(risk_amount) > 0 else 9999.0
+            try:
+                max_mult = float(os.getenv("MIN_LOT_RISK_MULT_MAX", "2.0"))
+            except Exception:
+                max_mult = 2.0
+            max_mult = max(1.0, min(10.0, max_mult))
+
+            if implied_mult > max_mult:
+                self.logger.warning(
+                    f"LOT BLOCKED (MIN LOT) | Strategy: {strategy} | "
+                    f"Requested risk={risk_pct*100:.2f}% (${risk_amount:.2f}) but broker min lot {min_lot} "
+                    f"implies risk=${implied_risk:.2f} ({implied_mult:.2f}x). "
+                    f"Increase balance, tighten SL, or raise MIN_LOT_RISK_MULT_MAX."
+                )
+                return 0.0
+
+            self.logger.warning(
+                f"LOT CLAMPED TO MIN | Strategy: {strategy} | "
+                f"Requested risk=${risk_amount:.2f} but min lot {min_lot} implies risk=${implied_risk:.2f} "
+                f"({implied_mult:.2f}x)."
+            )
+            lot = float(min_lot)
+        else:
+            lot = float(raw_lot)
 
         # normalize to broker step
         lot = round(lot / step) * step
@@ -811,6 +881,14 @@ class MT5Executor:
 
     def _validate_lot_size(self, lot):
         """Validate lot size against account constraints"""
+        try:
+            lot = float(lot)
+        except Exception:
+            return {"valid": False, "reason": "Invalid lot value"}
+
+        if lot <= 0:
+            return {"valid": False, "reason": "Lot is zero (blocked by risk/min-lot rules)"}
+
         account = mt5.account_info()
         if not account:
             return {"valid": False, "reason": "No account info"}
@@ -941,6 +1019,16 @@ class MT5Executor:
             return None
         price0 = float(tick0.ask) if side == "buy" else float(tick0.bid)
 
+        drift_blocked, drift_reason = _entry_drift_too_large(
+            side=side,
+            entry_ref=entry_ref_f,
+            actual_price=price0,
+            raw_sl=raw_sl,
+        )
+        if drift_blocked:
+            self.logger.warning(f"[EXECUTE BLOCKED] {drift_reason}")
+            return None
+
         # Calculate lot size if not explicitly provided
         if lot is None:
             # Get symbol info for tick size
@@ -1027,6 +1115,7 @@ class MT5Executor:
         last_level_log = None
         last_sl_adj = None
         last_tp_adj = None
+        last_price = None
         for attempt in range(retries + 1):
             tick = mt5.symbol_info_tick(self.symbol)
             if not tick:
@@ -1034,6 +1123,7 @@ class MT5Executor:
                 return None
 
             price = float(tick.ask) if side == "buy" else float(tick.bid)
+            last_price = float(price)
 
             sl_adj, tp_adj, lvl_notes = _normalize_levels_for_execution(
                 symbol=self.symbol,
@@ -1087,7 +1177,7 @@ class MT5Executor:
                 symbol=self.symbol,
                 side=str(signal.get("side", "")).lower(),
                 lot=float(lot) if lot is not None else None,
-                price=float(price) if price is not None else None,
+                price=float(last_price) if last_price is not None else None,
                 sl=float(last_sl_adj) if last_sl_adj is not None else (float(signal.get("sl")) if signal.get("sl") is not None else None),
                 tp=float(last_tp_adj) if last_tp_adj is not None else (float(signal.get("tp")) if signal.get("tp") is not None else None),
                 deviation_points=int(request.get("deviation", 0)) if isinstance(request.get("deviation", 0), int) else None,
@@ -1128,14 +1218,17 @@ class MT5Executor:
 
         # ✅ SUCCESSFUL ORDER
         strategy_name = signal.get("strategy", "unknown")
+        exec_price = float(request.get("price", 0.0) or 0.0)
+        exec_sl = float(request.get("sl", 0.0) or 0.0)
+        exec_tp = float(request.get("tp", 0.0) or 0.0)
         log_separator(self.logger, f"TRADE EXECUTED - {strategy_name.upper()}", char="=", width=60)
         self.logger.info(
             f"  Symbol: {self.symbol}\n"
             f"  Side: {signal['side'].upper()}\n"
             f"  Lot: {lot}\n"
-            f"  Price: {price}\n"
-            f"  SL: {signal['sl']}\n"
-            f"  TP: {signal['tp']}\n"
+            f"  Price: {exec_price}\n"
+            f"  SL: {exec_sl}\n"
+            f"  TP: {exec_tp}\n"
             f"  Ticket: {result.order}"
         )
         log_separator(self.logger, char="=", width=60)
@@ -1144,9 +1237,9 @@ class MT5Executor:
             f"TRADE EXECUTED | {strategy_name.upper()}\n"
             f"{self.symbol} {signal['side'].upper()}\n"
             f"Lot: {lot}\n"
-            f"Price: {price}\n"
-            f"SL: {signal['sl']}\n"
-            f"TP: {signal['tp']}\n"
+            f"Price: {exec_price}\n"
+            f"SL: {exec_sl}\n"
+            f"TP: {exec_tp}\n"
             f"Ticket: {result.order}"
         )
 
@@ -1154,9 +1247,9 @@ class MT5Executor:
             symbol=self.symbol,
             side=signal["side"],
             lot=lot,
-            price=price,
-            sl=signal["sl"],
-            tp=signal["tp"],
+            price=exec_price,
+            sl=exec_sl,
+            tp=exec_tp,
             ticket=result.order,
             retcode=result.retcode,
             comment=result.comment
