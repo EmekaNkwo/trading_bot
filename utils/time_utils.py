@@ -5,8 +5,8 @@ class SessionFilter:
 
     def __init__(
         self,
-        london=(8, 17),
-        newyork=(13, 22),
+        london=(6, 18),
+        newyork=(12, 23),
         tz_name="UTC"
     ):
         self.london = london
