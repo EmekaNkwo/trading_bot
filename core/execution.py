@@ -17,6 +17,8 @@ def _strategy_code(strategy: str) -> str:
         "xau_scalper": "xs",
         "xau_regime": "xr",
         "xau_sweep": "xw",
+        "xau_liquidity_reclaim": "xl",
+        "xau_opening_range_displacement": "xo",
     }.get(strategy, "uk")
 
 
@@ -48,7 +50,14 @@ def _parse_strategy_from_comment(comment: str | None) -> str:
     if len(parts) < 2:
         return "unknown"
     code = parts[1]
-    return {"xt": "xau_trend", "xs": "xau_scalper", "xr": "xau_regime", "xw": "xau_sweep"}.get(code, "unknown")
+    return {
+        "xt": "xau_trend",
+        "xs": "xau_scalper",
+        "xr": "xau_regime",
+        "xw": "xau_sweep",
+        "xl": "xau_liquidity_reclaim",
+        "xo": "xau_opening_range_displacement",
+    }.get(code, "unknown")
 
 
 def _retcode_name(retcode: Any) -> str:

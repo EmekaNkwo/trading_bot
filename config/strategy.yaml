@@ -113,24 +113,24 @@ market_state:
 
 liquidity_reclaim:
   atr_period: 14
-  recent_sweep_minutes: 20
+  recent_sweep_minutes: 45
   reclaim_buffer_atr: 0.05
   wick_reject_ratio: 0.45
   sl_buffer_atr: 0.20
   rr_target: 1.60
   min_bars_between_signals: 2
   require_active_session: true
-  block_high_vol: true
+  block_high_vol: false
 
 opening_range_displacement:
   atr_period: 14
   break_buffer_atr: 0.08
-  min_body_atr: 0.45
-  max_extension_atr: 0.80
+  min_body_atr: 0.30
+  max_extension_atr: 1.20
   sl_buffer_atr: 0.25
   rr_target: 1.70
   require_active_session: true
-  require_non_low_vol: true
+  require_non_low_vol: false
   min_bars_between_signals: 2
 
 risk:

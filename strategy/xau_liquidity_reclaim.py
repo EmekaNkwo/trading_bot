@@ -55,37 +55,42 @@ class XAULiquidityReclaimStrategy:
         upper_wick = high - max(o, c)
         return (upper_wick / rng) >= self.wick_reject_ratio
 
+    def _skip(self, now: pd.Timestamp, reason: str):
+        self.logger.info(f"LIQ RECLAIM SKIP | {now} | {reason}")
+        return None
+
     def on_candle(self, df: pd.DataFrame):
         if df is None or df.empty or len(df) < (self.atr_period + 5):
-            return None
+            now = pd.Timestamp(df.index[-1]) if (df is not None and not df.empty) else pd.Timestamp.utcnow()
+            return self._skip(now, "insufficient candles")
 
         now = pd.Timestamp(df.index[-1])
         if not self._cooldown_ok(now):
-            return None
+            return self._skip(now, "cooldown active")
 
         if self.require_active_session and (not self.session.allowed(now)):
-            return None
+            return self._skip(now, "outside active session")
 
         a = atr(df, self.atr_period).iloc[-1]
         if a is None or pd.isna(a) or float(a) <= 0:
-            return None
+            return self._skip(now, "ATR invalid")
         atr_val = float(a)
         last = df.iloc[-1]
         entry = float(last.close)
 
         if self.market_state is None:
-            return None
+            return self._skip(now, "market_state unavailable")
         st = self.market_state.get(self.symbol)
         if st is None or st.last_sweep_direction is None or st.last_sweep_time is None:
-            return None
+            return self._skip(now, "no recent sweep context")
         if self.block_high_vol and st.volatility_regime == "high":
-            return None
+            return self._skip(now, "blocked in high volatility regime")
 
         age = now - pd.Timestamp(st.last_sweep_time)
         if age < pd.Timedelta(0) or age > pd.Timedelta(minutes=max(1, self.recent_sweep_minutes)):
-            return None
+            return self._skip(now, f"sweep age out of window ({age})")
         if st.last_sweep_level is None or st.last_sweep_extreme is None:
-            return None
+            return self._skip(now, "sweep level/extreme missing")
 
         # Sweep down then reclaim above level => buy
         if st.last_sweep_direction == "down":
@@ -94,7 +99,7 @@ class XAULiquidityReclaimStrategy:
                 sl = min(float(last.low), float(st.last_sweep_extreme)) - (atr_val * self.sl_buffer_atr)
                 risk = entry - sl
                 if risk <= 0:
-                    return None
+                    return self._skip(now, "buy risk <= 0 after SL calc")
                 tp = entry + (risk * self.rr_target)
                 self._last_signal_at = now
                 self.logger.info(f"LIQ RECLAIM BUY | {now} | lvl={st.last_sweep_level:.3f} atr={atr_val:.3f}")
@@ -106,6 +111,7 @@ class XAULiquidityReclaimStrategy:
                     "entry": entry,
                     "min_rr": float(self.rr_target),
                 }
+            return self._skip(now, "buy reclaim/wick conditions not met")
 
         # Sweep up then reclaim below level => sell
         if st.last_sweep_direction == "up":
@@ -114,7 +120,7 @@ class XAULiquidityReclaimStrategy:
                 sl = max(float(last.high), float(st.last_sweep_extreme)) + (atr_val * self.sl_buffer_atr)
                 risk = sl - entry
                 if risk <= 0:
-                    return None
+                    return self._skip(now, "sell risk <= 0 after SL calc")
                 tp = entry - (risk * self.rr_target)
                 self._last_signal_at = now
                 self.logger.info(f"LIQ RECLAIM SELL | {now} | lvl={st.last_sweep_level:.3f} atr={atr_val:.3f}")
@@ -126,6 +132,7 @@ class XAULiquidityReclaimStrategy:
                     "entry": entry,
                     "min_rr": float(self.rr_target),
                 }
+            return self._skip(now, "sell reclaim/wick conditions not met")
 
-        return None
+        return self._skip(now, "sweep direction not actionable")
 

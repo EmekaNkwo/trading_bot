@@ -1,6 +1,5 @@
 PORTFOLIO = {
-    # "max_total_risk": 0.02,
-    "max_total_risk": 0.01,
+    "max_total_risk": 0.02,
 
     "symbols": {
         "XAUUSDm": {
@@ -19,12 +18,21 @@ PORTFOLIO = {
                     "risk": 0.005
                 },
 
+                # Re-enable a proven higher-frequency strategy to avoid zero-trade weeks
+                "xau_sweep": {
+                    "timeframe": "M5",
+                    "candle_seconds": 300,
+                    "risk": 0.005
+                },
+
+                # Re-enable regime strategy so all 4 run together
+                "xau_regime": {
+                    "timeframe": "M5",
+                    "candle_seconds": 300,
+                    "risk": 0.005
+                },
+
                 # Previous strategies (paused)
-                # "xau_regime": {
-                #     "timeframe": "M5",
-                #     "candle_seconds": 300,
-                #     "risk": 0.005
-                # },
                 # "xau_sweep": {
                 #     "timeframe": "M5",
                 #     "candle_seconds": 300,

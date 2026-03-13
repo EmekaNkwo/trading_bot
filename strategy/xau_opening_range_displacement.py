@@ -43,29 +43,35 @@ class XAUOpeningRangeDisplacementStrategy:
         bars = int((now - self._last_signal_at).total_seconds() / 300.0)
         return bars >= self.min_bars_between_signals
 
+    def _skip(self, now: pd.Timestamp, reason: str):
+        self.logger.info(f"OR DISP SKIP | {now} | {reason}")
+        return None
+
     def on_candle(self, df: pd.DataFrame):
         if df is None or df.empty or len(df) < (self.atr_period + 10):
-            return None
+            now = pd.Timestamp(df.index[-1]) if (df is not None and not df.empty) else pd.Timestamp.utcnow()
+            return self._skip(now, "insufficient candles")
         if self.market_state is None:
-            return None
+            now = pd.Timestamp(df.index[-1]) if (df is not None and not df.empty) else pd.Timestamp.utcnow()
+            return self._skip(now, "market_state unavailable")
 
         now = pd.Timestamp(df.index[-1])
         if not self._cooldown_ok(now):
-            return None
+            return self._skip(now, "cooldown active")
         if self.require_active_session and (not self.session.allowed(now)):
-            return None
+            return self._skip(now, "outside active session")
 
         st = self.market_state.get(self.symbol)
         if st is None or (not st.opening_range_ready):
-            return None
+            return self._skip(now, "opening range not ready")
         if st.opening_range_high is None or st.opening_range_low is None:
-            return None
+            return self._skip(now, "opening range levels missing")
         if self.require_non_low_vol and st.volatility_regime == "low":
-            return None
+            return self._skip(now, "blocked in low volatility regime")
 
         a = atr(df, self.atr_period).iloc[-1]
         if a is None or pd.isna(a) or float(a) <= 0:
-            return None
+            return self._skip(now, "ATR invalid")
         atr_val = float(a)
 
         last = df.iloc[-1]
@@ -78,17 +84,17 @@ class XAUOpeningRangeDisplacementStrategy:
         dn_break = or_low - (atr_val * self.break_buffer_atr)
 
         if body < (atr_val * self.min_body_atr):
-            return None
+            return self._skip(now, f"body too small ({body:.3f} < {atr_val * self.min_body_atr:.3f})")
 
         # Long displacement
         if entry > up_break:
             extension = entry - or_high
             if extension > (atr_val * self.max_extension_atr):
-                return None
+                return self._skip(now, f"long extension too large ({extension:.3f})")
             sl = or_low - (atr_val * self.sl_buffer_atr)
             risk = entry - sl
             if risk <= 0:
-                return None
+                return self._skip(now, "buy risk <= 0 after SL calc")
             tp = entry + (risk * self.rr_target)
             self._last_signal_at = now
             self.logger.info(f"OR DISP BUY | {now} | OR=({or_low:.3f},{or_high:.3f}) atr={atr_val:.3f}")
@@ -105,11 +111,11 @@ class XAUOpeningRangeDisplacementStrategy:
         if entry < dn_break:
             extension = or_low - entry
             if extension > (atr_val * self.max_extension_atr):
-                return None
+                return self._skip(now, f"short extension too large ({extension:.3f})")
             sl = or_high + (atr_val * self.sl_buffer_atr)
             risk = sl - entry
             if risk <= 0:
-                return None
+                return self._skip(now, "sell risk <= 0 after SL calc")
             tp = entry - (risk * self.rr_target)
             self._last_signal_at = now
             self.logger.info(f"OR DISP SELL | {now} | OR=({or_low:.3f},{or_high:.3f}) atr={atr_val:.3f}")
@@ -122,5 +128,5 @@ class XAUOpeningRangeDisplacementStrategy:
                 "min_rr": float(self.rr_target),
             }
 
-        return None
+        return self._skip(now, "no displacement breakout")
 
