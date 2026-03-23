@@ -99,6 +99,11 @@ class XAURegimeStrategy:
 
         event_time = pd.Timestamp(event.timestamp)
         now_time = pd.Timestamp(candle_time)
+        # Normalize both to tz-naive UTC to avoid tz-naive vs tz-aware subtraction errors
+        if event_time.tzinfo is not None:
+            event_time = event_time.tz_convert("UTC").tz_localize(None)
+        if now_time.tzinfo is not None:
+            now_time = now_time.tz_convert("UTC").tz_localize(None)
         age = now_time - event_time
         if age < pd.Timedelta(0):
             return False, None
