@@ -4,6 +4,7 @@ from utils.telegram import TelegramNotifier
 from config.secrets import get_telegram_credentials
 from utils.logger import setup_logger, log_separator
 from config.loader import load_config
+from models.trade_intent import TradeIntent
 
 
 class TradingEngine:
@@ -65,12 +66,7 @@ class TradingEngine:
     # CORE CANDLE PROCESSING (shared)
     # ====================================================
 
-    def _process_candle(self):
-        """
-        Executes exactly ONE candle cycle.
-        Used by both single-symbol and portfolio engines.
-        """
-
+    def _load_new_candle_data(self):
         df = self.broker.get_historical_data(
             symbol=self.symbol,
             timeframe=self.timeframe,
@@ -81,9 +77,44 @@ class TradingEngine:
 
         # only new candles
         if self.last_candle_time == candle_time:
-            return
+            return None, None
 
         self.last_candle_time = candle_time
+        return df, candle_time
+
+    def _build_trade_intent(self, signal: dict, candle_time, risk_request: float | None = None) -> TradeIntent:
+        if risk_request is None:
+            risk_request = getattr(self.executor, "last_risk_pct", None)
+        return TradeIntent.from_signal(
+            symbol=self.symbol,
+            timeframe=self.timeframe,
+            candle_time=candle_time,
+            signal=signal,
+            risk_request=risk_request,
+        )
+
+    def _log_signal(self, intent: TradeIntent) -> None:
+        log_separator(self.logger, f"SIGNAL - {intent.strategy.upper()}")
+        self.logger.info(
+            f"  Symbol: {intent.symbol} | Side: {intent.side.upper()}\n"
+            f"  SL: {intent.sl} | TP: {intent.tp}"
+        )
+        log_separator(self.logger)
+
+        self.notifier.send(
+            f"SIGNAL | {intent.symbol} | {intent.strategy.upper()} | "
+            f"{intent.side.upper()} | "
+            f"SL={intent.sl} TP={intent.tp}"
+        )
+
+    def generate_trade_intent(self, risk_request: float | None = None) -> TradeIntent | None:
+        """
+        Generate one trade intent from the latest candle, if any.
+        This keeps strategy evaluation separate from trade approval/execution.
+        """
+        df, candle_time = self._load_new_candle_data()
+        if df is None or candle_time is None:
+            return None
 
         if self.market_state is not None:
             try:
@@ -94,34 +125,18 @@ class TradingEngine:
         signal = self.strategy.on_candle(df)
 
         if not signal:
-            return
+            return None
 
-        # ---------------- SIGNAL ----------------
-        strategy_name = signal.get("strategy", "unknown")
-        log_separator(self.logger, f"SIGNAL - {strategy_name.upper()}")
-        self.logger.info(
-            f"  Symbol: {self.symbol} | Side: {signal['side'].upper()}\n"
-            f"  SL: {signal['sl']} | TP: {signal['tp']}"
-        )
-        log_separator(self.logger)
+        intent = self._build_trade_intent(signal, candle_time, risk_request=risk_request)
+        self._log_signal(intent)
+        return intent
 
-        self.notifier.send(
-            f"SIGNAL | {self.symbol} | {strategy_name.upper()} | "
-            f"{signal['side'].upper()} | "
-            f"SL={signal['sl']} TP={signal['tp']}"
-        )
+    def approve_trade_intent(self, intent: TradeIntent) -> tuple[bool, str]:
+        return self.risk.allow_new_trade()
 
-        # ---------------- RISK CHECK ----------------
-        allowed, reason = self.risk.allow_new_trade()
-
-        if not allowed:
-            self.logger.warning(f"TRADE BLOCKED | {reason}")
-            self.notifier.send(f"TRADE BLOCKED | {reason}")
-            return
-
-        # ---------------- EXECUTION ----------------
+    def execute_trade_intent(self, intent: TradeIntent):
         result = self.executor.place_market_order(
-            signal=signal,
+            signal=intent.signal,
             risk_pct=getattr(self.executor, "last_risk_pct", None),
         )
 
@@ -129,18 +144,37 @@ class TradingEngine:
             self.risk.record_trade()
             log_separator(self.logger, "ORDER SUCCESS")
             self.logger.info(
-                f"  Symbol: {self.symbol}\n"
-                f"  Strategy: {strategy_name.upper()}\n"
+                f"  Symbol: {intent.symbol}\n"
+                f"  Strategy: {intent.strategy.upper()}\n"
                 f"  Ticket: {result.order}"
             )
             log_separator(self.logger)
             self.notifier.send(
-                f"ORDER EXECUTED | {self.symbol} | {strategy_name.upper()} | "
+                f"ORDER EXECUTED | {intent.symbol} | {intent.strategy.upper()} | "
                 f"TICKET={result.order}"
             )
         else:
             self.logger.warning("ORDER FAILED")
             self.notifier.send("ORDER FAILED")
+        return result
+
+    def _process_candle(self):
+        """
+        Executes exactly ONE candle cycle.
+        Used by both single-symbol and portfolio engines.
+        """
+        intent = self.generate_trade_intent()
+        if intent is None:
+            return
+
+        allowed, reason = self.approve_trade_intent(intent)
+
+        if not allowed:
+            self.logger.warning(f"TRADE BLOCKED | {reason}")
+            self.notifier.send(f"TRADE BLOCKED | {reason}")
+            return
+
+        self.execute_trade_intent(intent)
 
     # ====================================================
     # SINGLE SYMBOL MODE

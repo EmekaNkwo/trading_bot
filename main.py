@@ -4,6 +4,8 @@ import os
 import threading
 from datetime import datetime, timedelta
 
+import pandas as pd
+
 from utils.logger import setup_logger
 from utils.telegram import TelegramNotifier
 from config.secrets import get_telegram_credentials
@@ -19,9 +21,15 @@ from backtest.metrics import backtest_metrics
 from backtest.report import export_trades
 
 from walkforward.engine import WalkForwardEngine
-from walkforward.report import summarize_walkforward
+from walkforward.report import summarize_walkforward, summarize_walkforward_by_strategy
 
-from research.parameter_rotation import run_parameter_rotation
+from research.parameter_rotation import (
+    evaluate_rotation_candidates,
+    get_rotation_candidate_params,
+    load_rotation_base_config,
+    save_best_rotation,
+)
+from research.workflow_graph import ResearchWorkflowGraph
 from reports.performance import daily_summary
 
 from strategy.xau_trend import XAUTrendStrategy
@@ -29,6 +37,7 @@ from strategy.factory import build_strategy
 from config.loader import load_config
 
 from portfolio.engine import PortfolioEngine
+from core.market_state import MarketStateStore
 from utils.crash_handler import CrashHandler
 from utils.heartbeat import Heartbeat
 
@@ -57,7 +66,10 @@ def _start_monitoring_api_background() -> None:
         return
 
     host = os.getenv("MONITORING_API_HOST", "127.0.0.1")
-    port = int(os.getenv("MONITORING_API_PORT", "8000"))
+    try:
+        port = int(os.getenv("MONITORING_API_PORT", "8000"))
+    except Exception:
+        port = 8000
     log_level = os.getenv("MONITORING_API_LOG_LEVEL", "warning")
 
     def _run():
@@ -217,24 +229,45 @@ def run_walkforward_module():
     # -----------------------------------------
     wt_cfg = config.get("backtest", {}) or {}
     min_trades = int(wf_cfg.get("min_trades", wt_cfg.get("min_trades", 0)))
-
-    wf = WalkForwardEngine(
-        train_bars=int(wf_cfg.get("train_bars", 6000)),
-        test_bars=int(wf_cfg.get("test_bars", 2000)),
-        step_bars=int(wf_cfg.get("step_bars", 2000)),
-    )
+    configured = wf_cfg.get("strategies")
+    if isinstance(configured, (list, tuple)):
+        strategy_names = [str(name).strip() for name in configured if str(name).strip()]
+    else:
+        strategy_names = [str(wf_cfg.get("strategy", "xau_sweep")).strip()]
+    strategy_names = list(dict.fromkeys(strategy_names))
 
     # Walk-forward is also verbose; keep console quiet.
     changed = _set_console_log_level(logging.WARNING)
     try:
-        strat_name = str(wf_cfg.get("strategy", "xau_sweep"))
-        results = wf.run(
-            df,
-            strategy_factory=lambda: build_strategy(strat_name, config, symbol=symbol)
-        )
+        strategy_results = []
+        for strat_name in strategy_names:
+            logger.info(f"WALK-FORWARD RUN | symbol={symbol} timeframe={timeframe} strategy={strat_name}")
+            wf = WalkForwardEngine(
+                train_bars=int(wf_cfg.get("train_bars", 6000)),
+                test_bars=int(wf_cfg.get("test_bars", 2000)),
+                step_bars=int(wf_cfg.get("step_bars", 2000)),
+            )
+            wf_market_state = MarketStateStore(config)
+            result = wf.run(
+                df,
+                strategy_factory=lambda name=strat_name, market_state=wf_market_state: _build_walkforward_strategy(
+                    name,
+                    config,
+                    symbol,
+                    market_state,
+                ),
+                symbol=symbol,
+                timeframe=timeframe,
+            )
+            if result.empty:
+                continue
+            tagged = result.copy()
+            tagged["strategy"] = strat_name
+            strategy_results.append(tagged)
     finally:
         _restore_console_log_level(changed)
 
+    results = pd.concat(strategy_results, ignore_index=True) if strategy_results else pd.DataFrame()
     if results.empty:
         logger.warning("WALK-FORWARD INVALID | no results produced")
         notifier.send("WALK-FORWARD INVALID | no results produced")
@@ -259,14 +292,33 @@ def run_walkforward_module():
     # -----------------------------------------
     # Save & summarize only if valid
     # -----------------------------------------
+    os.makedirs("reports", exist_ok=True)
     results.to_csv("reports/walkforward_report.csv", index=False)
-
     summary = summarize_walkforward(results)
+    strategy_summaries = summarize_walkforward_by_strategy(results)
+    if strategy_summaries:
+        pd.DataFrame(strategy_summaries).to_csv("reports/walkforward_summary.csv", index=False)
 
-    logger.info("WALK-FORWARD COMPLETE")
-    notifier.send("WALK-FORWARD COMPLETE")
-    logger.info(summary)
-    notifier.send(summary)
+    summary_lines = [
+        f"WALK-FORWARD COMPLETE | symbol={symbol} timeframe={timeframe}",
+        f"Strategies={len(strategy_names)} | Windows={summary['windows']} | Trades={int(total_trades)}",
+        (
+            f"Avg PF={summary['avg_profit_factor']} | "
+            f"Consistency={summary['consistency_%']}% | "
+            f"Avg DD={summary['avg_drawdown']}"
+        ),
+    ]
+    if strategy_summaries:
+        best = strategy_summaries[0]
+        summary_lines.append(
+            "Best strategy: "
+            f"{best['strategy']} | PF={best['avg_profit_factor']} | "
+            f"Consistency={best['consistency_%']}% | Trades={best['total_trades']}"
+        )
+    summary_text = "\n".join(summary_lines)
+
+    logger.info(summary_text)
+    notifier.send(summary_text)
 
 
 
@@ -287,6 +339,61 @@ def run_portfolio_live(orchestrator):
 
     logger.info("PORTFOLIO LIVE MODE EXITED")
     notifier.send("PORTFOLIO LIVE MODE EXITED")
+
+
+def run_reporting_module():
+    summary = daily_summary()
+    if summary:
+        notifier.send(
+            "DAILY PERFORMANCE SUMMARY\n"
+            f"Date: {summary['date']}\n"
+            f"Trades: {summary['trades']}\n"
+            f"Wins: {summary['wins']}\n"
+            f"Losses: {summary['losses']}"
+        )
+        logger.info(f"DAILY REPORT SENT | {summary}")
+    else:
+        logger.info("DAILY REPORT SKIPPED | no trades for today")
+    return summary
+
+
+def rollback_rotation_module(orchestrator):
+    orchestrator.rollback.rollback()
+    notifier.send("PARAMETER ROLLBACK ACTIVATED")
+    logger.warning("ROLLBACK ACTIVATED")
+    return {"rollback_triggered": True}
+
+
+def accept_rotation_module():
+    notifier.send("NEW PARAMETERS ACCEPTED")
+    logger.info("NEW PARAMETERS ACCEPTED")
+    return {"rollback_triggered": False}
+
+
+def _build_walkforward_strategy(strat_name, config, symbol, market_state):
+    strategy = build_strategy(strat_name, config, symbol=symbol)
+    if hasattr(strategy, "bind_market_state"):
+        strategy.bind_market_state(market_state)
+    return strategy
+
+
+def run_research_action(research_workflow, action: str):
+    try:
+        state = research_workflow.run(action)
+        STATE.set_research_workflow(state)
+        return state
+    except Exception as e:
+        logger.exception(f"RESEARCH WORKFLOW ERROR | action={action} | {e}")
+        STATE.set_error(f"RESEARCH WORKFLOW ERROR | action={action} | {e}")
+        error_state = {
+            "requested_at_utc": datetime.utcnow().isoformat() + "Z",
+            "engine": "main",
+            "action": str(action),
+            "status": "failed",
+            "reason": str(e),
+        }
+        STATE.set_research_workflow(error_state)
+        return error_state
     
 
 def get_smart_sleep(mode=None):
@@ -371,6 +478,17 @@ def main():
         max_open_positions=int(r.get("max_open_positions", 1)),
     )
     orchestrator = BotOrchestrator(risk)
+    research_workflow = ResearchWorkflowGraph(
+        walkforward_runner=run_walkforward_module,
+        rotation_load_config_runner=load_rotation_base_config,
+        rotation_candidate_runner=get_rotation_candidate_params,
+        rotation_evaluate_runner=evaluate_rotation_candidates,
+        rotation_save_runner=save_best_rotation,
+        report_runner=run_reporting_module,
+        guard_evaluate=orchestrator.guard.evaluate,
+        rollback_runner=lambda: rollback_rotation_module(orchestrator),
+        rotation_accept_runner=accept_rotation_module,
+    )
     heartbeat = Heartbeat(interval_minutes=30)
 
     _start_monitoring_api_background()
@@ -389,6 +507,7 @@ def main():
 
         mode = orchestrator.decide_mode()
         STATE.set_mode(mode)
+        STATE.set_orchestrator_graph(orchestrator.graph_snapshot())
     
         now = datetime.utcnow()
 
@@ -400,18 +519,7 @@ def main():
         # NIGHTLY PERFORMANCE SUMMARY (23:00 UTC)
         # ---------------------------------------------
         if now.hour == 23 and last_report_date != now.date():
-
-            summary = daily_summary()
-
-            if summary:
-                notifier.send(
-                    "DAILY PERFORMANCE SUMMARY\n"
-                    f"Date: {summary['date']}\n"
-                    f"Trades: {summary['trades']}\n"
-                    f"Wins: {summary['wins']}\n"
-                    f"Losses: {summary['losses']}"
-                )
-
+            run_research_action(research_workflow, "report")
             last_report_date = now.date()
 
         # ---------------------------------------------
@@ -435,26 +543,16 @@ def main():
         elif mode == "walkforward":
 
             if last_walkforward_day != now.date():
-                run_walkforward_module()
+                run_research_action(research_workflow, "walkforward")
                 last_walkforward_day = now.date()
 
         # ---------------------------------------------
         # PARAMETER ROTATION
         # ---------------------------------------------
         elif mode == "rotate":
-
             logger.info("PARAMETER ROTATION MODE STARTED")
             notifier.send("PARAMETER ROTATION MODE STARTED")
-
-            run_parameter_rotation()
-
-            if not orchestrator.guard.evaluate():
-                orchestrator.rollback.rollback()
-                notifier.send("PARAMETER ROLLBACK ACTIVATED")
-                logger.warning("ROLLBACK ACTIVATED")
-            else:
-                notifier.send("NEW PARAMETERS ACCEPTED")
-                logger.info("NEW PARAMETERS ACCEPTED")
+            run_research_action(research_workflow, "rotate")
 
         # ---------------------------------------------
         # ORCHESTRATOR HEARTBEAT

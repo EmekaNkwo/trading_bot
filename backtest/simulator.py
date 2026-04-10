@@ -111,10 +111,13 @@ class BacktestEngine:
 
         self.close_trade(candle, pnl, "EOD")
 
-    def run(self, df, strategy, trade_start_idx=200, history_window=800):
+    def run(self, df, strategy, trade_start_idx=200, history_window=800, symbol=None, timeframe=None):
 
         start_i = max(1, int(trade_start_idx))
         warmup_i = 200
+        market_state = getattr(strategy, "market_state", None)
+        bound_symbol = str(symbol or getattr(strategy, "symbol", "XAUUSDm"))
+        bound_timeframe = str(timeframe or "M5")
 
         for i in range(warmup_i, len(df)):
             if history_window is None:
@@ -129,6 +132,11 @@ class BacktestEngine:
 
             # open new trade
             if self.open_trade is None and i >= start_i:
+                if market_state is not None:
+                    try:
+                        market_state.update(symbol=bound_symbol, timeframe=bound_timeframe, df=history)
+                    except Exception:
+                        pass
                 signal = strategy.on_candle(history)
                 if signal:
                     self.open_position(signal, candle)

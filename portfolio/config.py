@@ -1,5 +1,5 @@
 PORTFOLIO = {
-    "max_total_risk": 0.02,
+    "max_total_risk": 0.035,
 
     "symbols": {
         "XAUUSDm": {
@@ -50,16 +50,57 @@ PORTFOLIO = {
                 # },
             }
         },
-        
-        # "US30m": {
-        #     "timeframe": "M5",
-        #     "risk": 0.007,
-        #     "strategy": "xau_trend"
-        # },
-        # "GER30m": {
-        #     "timeframe": "M15",
-        #     "risk": 0.006,
-        #     "strategy": "xau_trend"
-        # }
+        "US30m": {
+            "strategies": {
+                "us30_open_wick": {
+                    "timeframe": "M5",
+                    "candle_seconds": 300,
+                    "risk": 0.001,
+                },
+                "us30_asia_eq": {
+                    "timeframe": "M5",
+                    "candle_seconds": 300,
+                    "risk": 0.001,
+                },
+                "us30_trend_pullback": {
+                    "timeframe": "M5",
+                    "candle_seconds": 300,
+                    "risk": 0.001,
+                },
+                "us30_supply_demand": {
+                    "timeframe": "M5",
+                    "candle_seconds": 300,
+                    "risk": 0.001,
+                },
+                "us30_fib_retrace": {
+                    "timeframe": "M5",
+                    "candle_seconds": 300,
+                    "risk": 0.001,
+                },
+            }
+        },
+        "GER30m": {
+            "strategies": {
+                "ger30_three_pin_breakout": {
+                    "timeframe": "M5",
+                    "candle_seconds": 300,
+                    "risk": 0.003,
+                },
+            }
+        },
+        "BTCUSDm": {
+            "strategies": {
+                "btc_bos_retest": {
+                    "timeframe": "M5",
+                    "candle_seconds": 300,
+                    "risk": 0.0015,
+                },
+                "multi_asset_regime": {
+                    "timeframe": "M5",
+                    "candle_seconds": 300,
+                    "risk": 0.0015,
+                },
+            }
+        },
     }
 }

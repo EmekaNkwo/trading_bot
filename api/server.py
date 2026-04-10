@@ -124,7 +124,7 @@ def create_app() -> FastAPI:
             allow_headers=["*"],
         )
 
-    @app.get("/health", dependencies=[Depends(_require_token)])
+    @app.get("/health")
     def health() -> dict[str, Any]:
         return {"ok": True, "time_utc": _utcnow_iso()}
 
@@ -146,6 +146,11 @@ def create_app() -> FastAPI:
                 "last_mode_change_utc": snap.last_mode_change_utc,
                 "last_error": snap.last_error,
                 "last_deal": snap.last_deal,
+                "last_signal": snap.last_signal,
+                "last_intent": snap.last_intent,
+                "portfolio_runtime": snap.portfolio_runtime,
+                "orchestrator_graph": snap.orchestrator_graph,
+                "research_workflow": snap.research_workflow,
             },
             "reports": {
                 "live_deals_csv": str(LIVE_DEALS_CSV),

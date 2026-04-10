@@ -26,3 +26,32 @@ def summarize_walkforward(df):
         "loss_windows": loss,
         "consistency_%": round(float(consistency), 2),
     }
+
+
+def summarize_walkforward_by_strategy(df):
+    if df.empty or "strategy" not in df.columns:
+        return []
+
+    summaries = []
+    grouped = df.groupby("strategy", dropna=False)
+    for strategy, group in grouped:
+        summary = summarize_walkforward(group)
+        summary.update(
+            {
+                "strategy": str(strategy),
+                "total_trades": int(group["trades"].sum()) if "trades" in group.columns else 0,
+                "avg_win_rate": round(float(group["win_rate"].mean()), 2) if "win_rate" in group.columns else 0.0,
+                "net_profit_sum": round(float(group["net_profit"].sum()), 2) if "net_profit" in group.columns else 0.0,
+            }
+        )
+        summaries.append(summary)
+
+    summaries.sort(
+        key=lambda item: (
+            float(item.get("avg_profit_factor", 0.0)),
+            float(item.get("consistency_%", 0.0)),
+            float(item.get("net_profit_sum", 0.0)),
+        ),
+        reverse=True,
+    )
+    return summaries

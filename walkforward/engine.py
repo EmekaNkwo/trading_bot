@@ -19,7 +19,7 @@ class WalkForwardEngine:
 
         self.results = []
 
-    def run(self, df, strategy_factory):
+    def run(self, df, strategy_factory, symbol=None, timeframe=None):
         """
         strategy_factory() must return a NEW strategy instance.
         """
@@ -50,6 +50,8 @@ class WalkForwardEngine:
                 strategy,
                 trade_start_idx=len(train_df),
                 history_window=None,
+                symbol=symbol,
+                timeframe=timeframe,
             )
 
             metrics = backtest_metrics(

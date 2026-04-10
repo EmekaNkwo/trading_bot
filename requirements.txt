@@ -6,3 +6,4 @@ pyyaml
 requests
 fastapi
 uvicorn
+langgraph

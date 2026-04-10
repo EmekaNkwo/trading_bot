@@ -133,6 +133,170 @@ opening_range_displacement:
   require_non_low_vol: false
   min_bars_between_signals: 2
 
+multi_asset_regime:
+  # Symbol-agnostic strategy for indices/crypto with per-symbol overrides.
+  atr_period: 14
+  adx_period: 14
+  rsi_period: 14
+  ema_fast: 20
+  ema_slow: 80
+
+  # Regime thresholds
+  trend_adx_min: 24
+  meanrev_adx_max: 18
+  trend_rsi_buy_max: 62
+  trend_rsi_sell_min: 38
+  mr_rsi_buy: 28
+  mr_rsi_sell: 72
+
+  # Risk model
+  sl_atr_trend: 1.6
+  tp_atr_trend: 2.2
+  sl_atr_meanrev: 1.3
+  tp_atr_meanrev: 1.8
+  min_rr: 1.2
+  min_bars_between_signals: 3
+
+  # Session model:
+  # - london_newyork: trade during LDN/NY windows
+  # - 24x7: trade all day (for crypto)
+  session_mode: london_newyork
+  allow_london: true
+  allow_newyork: true
+  allow_asia: false
+
+  symbols:
+    GER30m:
+      session_mode: london_newyork
+      trend_adx_min: 20
+      meanrev_adx_max: 16
+      sl_atr_trend: 1.7
+      tp_atr_trend: 2.3
+      min_rr: 1.25
+    BTCUSDm:
+      session_mode: 24x7
+      trend_adx_min: 26
+      meanrev_adx_max: 20
+      sl_atr_trend: 2.0
+      tp_atr_trend: 2.8
+      sl_atr_meanrev: 1.5
+      tp_atr_meanrev: 2.2
+      min_rr: 1.35
+
+us30_supply_demand:
+  atr_period: 14
+  rsi_period: 14
+  lookback_bars: 24
+  impulse_bars: 3
+  min_impulse_atr: 1.4
+  zone_buffer_atr: 0.10
+  sl_buffer_atr: 0.20
+  rr_target: 2.0
+  min_rr: 1.4
+  wick_reject_ratio: 0.35
+  min_bars_between_signals: 3
+  allow_london: true
+  allow_newyork: true
+
+us30_open_wick:
+  atr_period: 14
+  rsi_period: 14
+  newyork_open_hour_utc: 13
+  newyork_open_minute_utc: 30
+  preopen_lookback_bars: 24
+  wick_reject_ratio: 0.45
+  sl_buffer_atr: 0.18
+  rr_target: 2.2
+  min_rr: 1.6
+  min_bars_between_signals: 12
+  allow_london: false
+  allow_newyork: true
+
+us30_trend_pullback:
+  atr_period: 14
+  rsi_period: 14
+  wick_reject_ratio: 0.40
+  sl_buffer_atr: 0.22
+  rr_target: 2.0
+  min_rr: 1.4
+  min_trend_slope_atr: 0.04
+  min_ma_separation_atr: 0.12
+  min_bars_between_signals: 3
+  allow_london: true
+  allow_newyork: true
+
+us30_asia_eq:
+  atr_period: 14
+  rsi_period: 14
+  asia_start_hour_utc: 1
+  asia_end_hour_utc: 6
+  eq_buffer_atr: 0.18
+  sweep_buffer_atr: 0.12
+  sl_buffer_atr: 0.20
+  rr_target: 2.0
+  min_rr: 1.3
+  min_bars_between_signals: 6
+  allow_london: true
+  allow_newyork: true
+
+us30_fib_retrace:
+  atr_period: 14
+  rsi_period: 14
+  swing_lookback: 30
+  pullback_floor: 0.382
+  pullback_ceiling: 0.618
+  round_number_step: 100.0
+  round_number_buffer_atr: 0.35
+  sl_buffer_atr: 0.22
+  rr_target: 2.2
+  min_rr: 1.5
+  min_bars_between_signals: 3
+  allow_london: true
+  allow_newyork: true
+
+ger30_three_pin_breakout:
+  atr_period: 14
+  rsi_period: 14
+  sl_buffer_atr: 0.22
+  wick_reject_ratio: 0.35
+  rr_target: 1.8
+  min_rr: 1.4
+  min_bars_between_signals: 4
+  allow_london: true
+  allow_newyork: false
+  breakout_lookback_bars: 12
+  impulse_bars: 4
+  min_impulse_atr: 1.35
+  retest_buffer_atr: 0.10
+  min_trend_slope_atr: 0.035
+  trend_rsi_buy_min: 53.0
+  trend_rsi_sell_max: 47.0
+  breakout_body_min_atr: 0.22
+  breakout_hold_buffer_atr: 0.05
+  max_retest_depth_atr: 0.06
+
+btc_bos_retest:
+  atr_period: 14
+  rsi_period: 14
+  trend_fast_period: 21
+  trend_slow_period: 50
+  trend_slope_bars: 4
+  min_trend_slope_atr: 0.02
+  trend_rsi_buy_min: 51.0
+  trend_rsi_sell_max: 49.0
+  sl_buffer_atr: 0.32
+  rr_target: 2.0
+  min_rr: 1.4
+  wick_reject_ratio: 0.28
+  min_bars_between_signals: 3
+  allow_london: true
+  allow_newyork: true
+  allow_asia: false
+  bos_lookback: 72
+  bos_retest_buffer_atr: 0.08
+  bos_break_buffer_atr: 0.15
+  bos_liquidity_buffer_atr: 0.12
+
 risk:
   max_trades_per_day: 30
   max_daily_loss: 0.02
@@ -154,15 +318,109 @@ rotation:
   frequency_days: 30
   min_trades_required: 20
   rollback_drawdown_pct: 0.05
+  top_winners: 1
+  selected_strategies: {}
+  selected_execution: {}
+  symbols:
+    XAUUSDm:
+      top_winners: 2
+      candidates:
+        - strategy: xau_liquidity_reclaim
+          timeframe: M5
+          candle_seconds: 300
+          risk: 0.005
+          bars: 5000
+          min_trades: 20
+        - strategy: xau_opening_range_displacement
+          timeframe: M5
+          candle_seconds: 300
+          risk: 0.005
+          bars: 5000
+          min_trades: 20
+        - strategy: xau_sweep
+          timeframe: M5
+          candle_seconds: 300
+          risk: 0.005
+          bars: 5000
+          min_trades: 20
+        - strategy: xau_regime
+          timeframe: M5
+          candle_seconds: 300
+          risk: 0.005
+          bars: 5000
+          min_trades: 20
+    US30m:
+      top_winners: 2
+      candidates:
+        - strategy: us30_asia_eq
+          timeframe: M5
+          candle_seconds: 300
+          risk: 0.001
+          bars: 5000
+          min_trades: 5
+        - strategy: us30_open_wick
+          timeframe: M5
+          candle_seconds: 300
+          risk: 0.001
+          bars: 5000
+          min_trades: 5
+        - strategy: us30_trend_pullback
+          timeframe: M5
+          candle_seconds: 300
+          risk: 0.001
+          bars: 5000
+          min_trades: 5
+        - strategy: us30_supply_demand
+          timeframe: M5
+          candle_seconds: 300
+          risk: 0.001
+          bars: 5000
+          min_trades: 5
+        - strategy: us30_fib_retrace
+          timeframe: M5
+          candle_seconds: 300
+          risk: 0.001
+          bars: 5000
+          min_trades: 5
+    GER30m:
+      top_winners: 1
+      candidates:
+        - strategy: ger30_three_pin_breakout
+          timeframe: M5
+          candle_seconds: 300
+          risk: 0.003
+          bars: 5000
+          min_trades: 3
+    BTCUSDm:
+      top_winners: 2
+      candidates:
+        - strategy: btc_bos_retest
+          timeframe: M5
+          candle_seconds: 300
+          risk: 0.0015
+          bars: 6000
+          min_trades: 5
+        - strategy: multi_asset_regime
+          timeframe: M5
+          candle_seconds: 300
+          risk: 0.0015
+          bars: 6000
+          min_trades: 10
 
 session:
     allow_london: true
     allow_newyork: true
 
 walkforward:
-    # Make walk-forward produce enough trades to be meaningful.
+    # Evaluate the new US30 playbooks side by side on the same market data.
+    symbol: US30m
     timeframe: M5
-    strategy: xau_liquidity_reclaim
+    strategies:
+      - us30_open_wick
+      - us30_asia_eq
+      - us30_trend_pullback
+      - us30_supply_demand
+      - us30_fib_retrace
     train_bars: 6000
     test_bars: 2000
     step_bars: 2000

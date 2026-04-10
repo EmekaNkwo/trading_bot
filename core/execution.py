@@ -19,6 +19,14 @@ def _strategy_code(strategy: str) -> str:
         "xau_sweep": "xw",
         "xau_liquidity_reclaim": "xl",
         "xau_opening_range_displacement": "xo",
+        "multi_asset_regime": "ma",
+        "ger30_three_pin_breakout": "gp",
+        "btc_bos_retest": "bs",
+        "us30_supply_demand": "ud",
+        "us30_open_wick": "uw",
+        "us30_trend_pullback": "ut",
+        "us30_asia_eq": "ua",
+        "us30_fib_retrace": "uf",
     }.get(strategy, "uk")
 
 
@@ -57,6 +65,14 @@ def _parse_strategy_from_comment(comment: str | None) -> str:
         "xw": "xau_sweep",
         "xl": "xau_liquidity_reclaim",
         "xo": "xau_opening_range_displacement",
+        "ma": "multi_asset_regime",
+        "gp": "ger30_three_pin_breakout",
+        "bs": "btc_bos_retest",
+        "ud": "us30_supply_demand",
+        "uw": "us30_open_wick",
+        "ut": "us30_trend_pullback",
+        "ua": "us30_asia_eq",
+        "uf": "us30_fib_retrace",
     }.get(code, "unknown")
 
 
