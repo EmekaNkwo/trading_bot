@@ -7,9 +7,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 
+from utils.operator_controls import CONTROLS
 from utils.runtime_state import STATE
 
 
@@ -31,15 +32,52 @@ def _utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _require_token(authorization: Optional[str] = Header(default=None)) -> None:
+def _require_token(request: Request, authorization: Optional[str] = Header(default=None)) -> None:
     token = os.getenv("API_TOKEN")
     if not token:
-        return
+        host = str(getattr(request.client, "host", "") or "")
+        if host in {"127.0.0.1", "::1", "localhost"}:
+            return
+        raise HTTPException(status_code=401, detail="API_TOKEN required for remote access")
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing Bearer token")
     got = authorization.split(" ", 1)[1].strip()
     if got != token:
         raise HTTPException(status_code=403, detail="Invalid token")
+
+
+def _require_control_token(authorization: Optional[str] = Header(default=None)) -> None:
+    token = os.getenv("API_TOKEN")
+    if not token:
+        raise HTTPException(status_code=401, detail="API_TOKEN required for control endpoints")
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing Bearer token")
+    got = authorization.split(" ", 1)[1].strip()
+    if got != token:
+        raise HTTPException(status_code=403, detail="Invalid token")
+
+
+def _coerce_bool(value: Any, *, default: bool) -> bool:
+    if value is None:
+        return bool(default)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"1", "true", "yes", "on"}:
+            return True
+        if text in {"0", "false", "no", "off"}:
+            return False
+    raise HTTPException(status_code=400, detail="paused must be a boolean")
+
+
+def _coerce_reason(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    return text[:200]
 
 
 def _read_recent_deals(limit: int) -> list[dict[str, Any]]:
@@ -131,6 +169,7 @@ def create_app() -> FastAPI:
     @app.get("/status", dependencies=[Depends(_require_token)])
     def status() -> dict[str, Any]:
         snap = STATE.snapshot()
+        controls = CONTROLS.reload()
         deals_count = 0
         if LIVE_DEALS_CSV.exists():
             try:
@@ -149,6 +188,7 @@ def create_app() -> FastAPI:
                 "last_signal": snap.last_signal,
                 "last_intent": snap.last_intent,
                 "portfolio_runtime": snap.portfolio_runtime,
+                "operator_controls": controls,
                 "orchestrator_graph": snap.orchestrator_graph,
                 "research_workflow": snap.research_workflow,
             },
@@ -191,6 +231,35 @@ def create_app() -> FastAPI:
         path = _resolve_log_path(name)
         out = _tail_lines(path, lines)
         return {"time_utc": _utcnow_iso(), "name": name, "lines": lines, "items": out}
+
+    @app.get("/controls", dependencies=[Depends(_require_token)])
+    def controls_status() -> dict[str, Any]:
+        controls = CONTROLS.reload()
+        return {"time_utc": _utcnow_iso(), "controls": controls}
+
+    @app.post("/controls/pause", dependencies=[Depends(_require_control_token)])
+    def controls_pause(payload: dict[str, Any] | None = Body(default=None)) -> dict[str, Any]:
+        payload = payload or {}
+        paused = _coerce_bool(payload.get("paused", True), default=True)
+        controls = CONTROLS.set_global_pause(paused, reason=_coerce_reason(payload.get("reason")))
+        return {"time_utc": _utcnow_iso(), "controls": controls}
+
+    @app.post("/controls/symbols/{symbol}/kill", dependencies=[Depends(_require_control_token)])
+    def controls_kill_symbol(symbol: str, payload: dict[str, Any] | None = Body(default=None)) -> dict[str, Any]:
+        payload = payload or {}
+        controls = CONTROLS.kill_symbol(symbol, reason=_coerce_reason(payload.get("reason")))
+        return {"time_utc": _utcnow_iso(), "controls": controls}
+
+    @app.post("/controls/symbols/{symbol}/unkill", dependencies=[Depends(_require_control_token)])
+    def controls_unkill_symbol(symbol: str) -> dict[str, Any]:
+        controls = CONTROLS.unkill_symbol(symbol)
+        return {"time_utc": _utcnow_iso(), "controls": controls}
+
+    @app.post("/controls/account-brake/clear", dependencies=[Depends(_require_control_token)])
+    def controls_clear_account_brake(payload: dict[str, Any] | None = Body(default=None)) -> dict[str, Any]:
+        payload = payload or {}
+        controls = CONTROLS.request_account_brake_clear(reason=_coerce_reason(payload.get("reason")))
+        return {"time_utc": _utcnow_iso(), "controls": controls}
 
     return app
 

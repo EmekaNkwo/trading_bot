@@ -81,6 +81,53 @@ class MT5Broker:
         self.connected = False
         logger.debug("MT5 shutdown")
 
+    def ensure_symbol(self, symbol: str) -> bool:
+        if not self.connected:
+            self.connect()
+        try:
+            info = mt5.symbol_info(symbol)
+        except Exception:
+            info = None
+        if info is None:
+            return False
+        if bool(getattr(info, "visible", False)):
+            return True
+        try:
+            return bool(mt5.symbol_select(symbol, True))
+        except Exception:
+            return False
+
+    def get_symbol_snapshot(self, symbol: str) -> dict:
+        if not self.ensure_symbol(symbol):
+            return {"ok": False, "symbol": symbol, "reason": "symbol_unavailable"}
+
+        info = mt5.symbol_info(symbol)
+        tick = mt5.symbol_info_tick(symbol)
+        if info is None:
+            return {"ok": False, "symbol": symbol, "reason": "missing_symbol_info"}
+        if tick is None:
+            return {"ok": False, "symbol": symbol, "reason": "missing_tick"}
+
+        bid = float(getattr(tick, "bid", 0.0) or 0.0)
+        ask = float(getattr(tick, "ask", 0.0) or 0.0)
+        point = float(getattr(info, "point", 0.0) or 0.0)
+        trade_mode = int(getattr(info, "trade_mode", 0) or 0)
+        tick_ok = bool(bid > 0 and ask > 0 and ask >= bid)
+        tradable = trade_mode != 0
+        return {
+            "ok": bool(tick_ok and tradable),
+            "symbol": symbol,
+            "bid": bid,
+            "ask": ask,
+            "spread": max(0.0, ask - bid),
+            "point": point,
+            "visible": bool(getattr(info, "visible", False)),
+            "trade_mode": trade_mode,
+            "volume_min": float(getattr(info, "volume_min", 0.0) or 0.0),
+            "volume_step": float(getattr(info, "volume_step", 0.0) or 0.0),
+            "reason": None if tick_ok and tradable else ("trade_disabled" if tick_ok else "invalid_tick_prices"),
+        }
+
     def get_historical_data(
         self,
         symbol: str,
@@ -90,6 +137,8 @@ class MT5Broker:
 
         if not self.connected:
             self.connect()
+        if not self.ensure_symbol(symbol):
+            raise RuntimeError(f"Symbol not available in MT5: {symbol}")
 
         if timeframe not in TIMEFRAMES:
             raise ValueError(f"Unsupported timeframe: {timeframe}")
@@ -106,7 +155,7 @@ class MT5Broker:
 
         df = pd.DataFrame(rates)
 
-        df["time"] = pd.to_datetime(df["time"], unit="s")
+        df["time"] = pd.to_datetime(df["time"], unit="s", utc=True)
         df.set_index("time", inplace=True)
 
         df = df[["open", "high", "low", "close", "tick_volume"]]

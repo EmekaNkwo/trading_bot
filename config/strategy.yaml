@@ -166,13 +166,6 @@ multi_asset_regime:
   allow_asia: false
 
   symbols:
-    GER30m:
-      session_mode: london_newyork
-      trend_adx_min: 20
-      meanrev_adx_max: 16
-      sl_atr_trend: 1.7
-      tp_atr_trend: 2.3
-      min_rr: 1.25
     BTCUSDm:
       session_mode: 24x7
       trend_adx_min: 26
@@ -312,6 +305,25 @@ breakeven:
   offset_spread_mult: 1.0
   # Extra safety: require at least this move (in points) before breakeven
   min_move_points: 30
+
+production_safety:
+  min_candles_required: 80
+  startup_history_bars: 120
+  max_candle_age_factor: 3.0
+  max_spread_to_bar_range: 0.35
+  max_spread_to_sl_ratio: 0.20
+  max_symbol_failures: 3
+  symbol_cooldown_minutes: 30
+  symbol_kill_switches: []
+  symbol_max_spread_points: {}
+  max_spread_points_default:
+  block_new_entries_with_pending_bot_order: true
+  block_new_entries_with_open_bot_position: false
+  max_open_bot_positions: 5
+  min_equity_balance_ratio: 0.90
+  min_free_margin_ratio: 0.25
+  reconcile_retries: 4
+  reconcile_sleep_ms: 250
 
 rotation:
   enabled: true

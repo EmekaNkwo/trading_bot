@@ -327,18 +327,22 @@ def run_walkforward_module():
 # ---------------------------------------------------
 
 def run_portfolio_live(orchestrator):
+    try:
+        portfolio = PortfolioEngine()
 
-    portfolio = PortfolioEngine()
-    
-    logger.info("LIVE MODE STARTED | MT5 OK | PORTFOLIO ACTIVE")
-    notifier.send("LIVE MODE STARTED | PORTFOLIO ACTIVE")
+        logger.info("LIVE MODE STARTED | MT5 OK | PORTFOLIO ACTIVE")
+        notifier.send("LIVE MODE STARTED | PORTFOLIO ACTIVE")
 
-    portfolio.run(
-        allow_fn=lambda: orchestrator.decide_mode() == "live"
-    )
+        portfolio.run(
+            allow_fn=lambda: orchestrator.decide_mode() == "live"
+        )
 
-    logger.info("PORTFOLIO LIVE MODE EXITED")
-    notifier.send("PORTFOLIO LIVE MODE EXITED")
+        logger.info("PORTFOLIO LIVE MODE EXITED")
+        notifier.send("PORTFOLIO LIVE MODE EXITED")
+    except Exception as e:
+        logger.exception(f"LIVE STARTUP BLOCKED | {e}")
+        notifier.send("LIVE STARTUP BLOCKED | see logs for details")
+        STATE.set_error(f"LIVE STARTUP BLOCKED | {e}")
 
 
 def run_reporting_module():

@@ -1,3 +1,8 @@
 rotation:
-  selected_strategies: {}
+  selected_strategies:
+    GER30m:
+      - ger30_three_pin_breakout
+    BTCUSDm:
+      - btc_bos_retest
+      - multi_asset_regime
   selected_execution: {}

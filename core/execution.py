@@ -1,6 +1,7 @@
 import MetaTrader5 as mt5
 import os
 import time
+from config.loader import load_config
 from utils.logger import setup_logger, log_separator
 from utils.telegram import TelegramNotifier
 from config.secrets import get_telegram_credentials
@@ -469,6 +470,8 @@ class MT5Executor:
         self.reporter = LiveTradeReporter()
         tg = get_telegram_credentials()
         self.notifier = TelegramNotifier(tg.token, tg.chat_id)
+        cfg = load_config() or {}
+        self.safety_cfg = dict(cfg.get("production_safety", {}) or {})
 
         # portfolio-aware state
         self.current_lot = 0.01        # default fallback
@@ -477,6 +480,116 @@ class MT5Executor:
         self.last_balance = None         # cache last balance for change detection
         self.last_recalc_time = None     # track last recalculation time
         self.recalc_interval = 60       # recalculate at most every 60 seconds
+
+    def market_safety_check(self, signal) -> tuple[bool, str | None, dict[str, float]]:
+        info = mt5.symbol_info(self.symbol)
+        tick = mt5.symbol_info_tick(self.symbol)
+        if not info:
+            return False, "missing_symbol_info", {}
+        if not tick:
+            return False, "missing_tick_data", {}
+
+        trade_mode = int(getattr(info, "trade_mode", 0) or 0)
+        if trade_mode == 0:
+            return False, "symbol_trade_disabled", {}
+
+        point = float(getattr(info, "point", 0.0) or 0.0)
+        if point <= 0:
+            point = float(getattr(info, "trade_tick_size", 0.0) or 0.01)
+
+        bid = float(getattr(tick, "bid", 0.0) or 0.0)
+        ask = float(getattr(tick, "ask", 0.0) or 0.0)
+        if bid <= 0 or ask <= 0 or ask < bid:
+            return False, "invalid_tick_prices", {}
+
+        spread = max(0.0, ask - bid)
+        spread_points = spread / point if point > 0 else 0.0
+
+        symbol_caps = dict(self.safety_cfg.get("symbol_max_spread_points", {}) or {})
+        cap = symbol_caps.get(self.symbol, self.safety_cfg.get("max_spread_points_default"))
+        if cap is not None:
+            try:
+                cap_f = float(cap)
+            except Exception:
+                cap_f = None
+            if cap_f is not None and cap_f > 0 and spread_points > cap_f:
+                return False, f"spread_points_exceeded:{spread_points:.1f}>{cap_f:.1f}", {
+                    "spread": spread,
+                    "spread_points": spread_points,
+                }
+
+        side = str(signal.get("side", "")).lower()
+        ref_price = ask if side == "buy" else bid
+        try:
+            sl = float(signal.get("sl"))
+        except Exception:
+            sl = None
+
+        if sl is not None:
+            sl_distance = abs(ref_price - sl)
+            try:
+                max_ratio = float(self.safety_cfg.get("max_spread_to_sl_ratio", 0.20) or 0.20)
+            except Exception:
+                max_ratio = 0.20
+            if sl_distance > 0 and spread > (sl_distance * max_ratio):
+                return False, f"spread_to_sl_exceeded:{spread:.5f}>{(sl_distance * max_ratio):.5f}", {
+                    "spread": spread,
+                    "spread_points": spread_points,
+                    "sl_distance": sl_distance,
+                }
+
+        return True, None, {"spread": spread, "spread_points": spread_points}
+
+    def confirm_order_visible(self, result, strategy: str) -> tuple[bool, str | None]:
+        if result is None:
+            return False, "missing_order_result"
+
+        try:
+            retries = int(self.safety_cfg.get("reconcile_retries", 4) or 4)
+        except Exception:
+            retries = 4
+        retries = max(1, min(10, retries))
+
+        try:
+            sleep_ms = int(self.safety_cfg.get("reconcile_sleep_ms", 250) or 250)
+        except Exception:
+            sleep_ms = 250
+        sleep_ms = max(0, min(5000, sleep_ms))
+
+        candidate_ids = {
+            int(getattr(result, field, 0) or 0)
+            for field in ("order", "deal", "position")
+        }
+        candidate_ids.discard(0)
+        if not candidate_ids:
+            return False, "missing_order_identifiers"
+
+        for _ in range(retries):
+            try:
+                positions = mt5.positions_get(symbol=self.symbol) or []
+            except Exception:
+                positions = []
+            for position in positions:
+                identifiers = {
+                    int(getattr(position, field, 0) or 0)
+                    for field in ("ticket", "identifier")
+                }
+                if candidate_ids & identifiers:
+                    return True, None
+
+            try:
+                orders = mt5.orders_get(symbol=self.symbol) or []
+            except Exception:
+                orders = []
+            for order in orders:
+                identifiers = {int(getattr(order, "ticket", 0) or 0)}
+                if candidate_ids & identifiers:
+                    return True, None
+
+            if sleep_ms > 0:
+                time.sleep(sleep_ms / 1000.0)
+
+        return False, f"order_not_visible_after_send:{sorted(candidate_ids)}"
 
     # -------------------------------------------------
     # PORTFOLIO RISK OVERRIDE
@@ -992,8 +1105,14 @@ class MT5Executor:
         
         # Equity protection
         equity_ratio = account.equity / account.balance if account.balance > 0 else 1
-        if equity_ratio < 0.9:  # 10% equity drawdown
-            self._last_protection_block_reason = f"Equity protection: equity/balance={equity_ratio:.2f} < 0.90"
+        try:
+            min_equity_ratio = float(self.safety_cfg.get("min_equity_balance_ratio", 0.90) or 0.90)
+        except Exception:
+            min_equity_ratio = 0.90
+        if equity_ratio < min_equity_ratio:
+            self._last_protection_block_reason = (
+                f"Equity protection: equity/balance={equity_ratio:.2f} < {min_equity_ratio:.2f}"
+            )
             self.logger.error(f"EQUITY PROTECTION | Equity ratio: {equity_ratio:.2f}")
             return False
         
@@ -1011,6 +1130,13 @@ class MT5Executor:
         
         strategy_name = signal.get("strategy", "unknown")
         self.logger.info(f"[EXECUTE START] {strategy_name} {signal['side']}")
+
+        market_ok, market_reason, market_metrics = self.market_safety_check(signal)
+        if not market_ok:
+            self.logger.error(
+                f"[EXECUTE BLOCKED] Market safety check failed: {market_reason} | metrics={market_metrics}"
+            )
+            return None
         
         # Parse raw levels once; we will re-normalize per attempt (price can change).
         side = str(signal.get("side", "")).lower()

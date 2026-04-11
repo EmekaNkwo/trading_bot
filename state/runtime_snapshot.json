@@ -1,0 +1,31 @@
+{
+  "last_deal": null,
+  "last_error": "STARTUP RECONCILIATION ISSUE | BTCUSDm | unexpected_live_strategy:multi_asset_regime",
+  "last_intent": null,
+  "last_mode_change_utc": "2026-04-11T00:21:54.740463+00:00",
+  "last_signal": null,
+  "mode": "walkforward",
+  "operator_controls": {
+    "account_brake_clear_nonce": 1,
+    "global_pause": true,
+    "global_pause_reason": "ops",
+    "killed_symbols": {},
+    "last_account_brake_clear_reason": "checked",
+    "last_account_brake_clear_utc": "2026-04-11T00:06:14.936986+00:00",
+    "updated_at_utc": "2026-04-11T00:06:14.945404+00:00"
+  },
+  "orchestrator_graph": {
+    "backtest_allowed": false,
+    "decided_mode": "walkforward",
+    "drawdown_ok": true,
+    "engine": "langgraph",
+    "live_allowed": false,
+    "reason": "nightly_walkforward_window",
+    "requested_at_utc": "2026-04-11T00:21:54.728782Z",
+    "rotation_allowed": false,
+    "walkforward_allowed": true
+  },
+  "portfolio_runtime": null,
+  "research_workflow": null,
+  "started_at_utc": "2026-04-10T23:53:09.555925+00:00"
+}

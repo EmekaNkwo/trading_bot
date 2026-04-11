@@ -31,3 +31,33 @@ class SymbolDrawdownGuard:
         # Interpret max_dd as % of account balance (e.g. 0.02 = 2%).
         threshold = self._last_account_balance * self.max_dd
         return drawdown <= threshold
+
+    def snapshot(self):
+        return {
+            "symbol_equity": {str(symbol): float(value) for symbol, value in self.symbol_equity.items()},
+            "symbol_peak": {str(symbol): float(value) for symbol, value in self.symbol_peak.items()},
+            "last_account_balance": (
+                float(self._last_account_balance) if self._last_account_balance is not None else None
+            ),
+        }
+
+    def restore(self, payload):
+        if not isinstance(payload, dict):
+            return
+        self.symbol_equity = {}
+        for symbol, value in dict(payload.get("symbol_equity", {}) or {}).items():
+            try:
+                self.symbol_equity[str(symbol)] = float(value)
+            except Exception:
+                continue
+        self.symbol_peak = {}
+        for symbol, value in dict(payload.get("symbol_peak", {}) or {}).items():
+            try:
+                self.symbol_peak[str(symbol)] = float(value)
+            except Exception:
+                continue
+        balance = payload.get("last_account_balance")
+        try:
+            self._last_account_balance = float(balance) if balance is not None else None
+        except Exception:
+            self._last_account_balance = None
