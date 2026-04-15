@@ -608,7 +608,7 @@ class PortfolioEngine:
             )
             STATE.set_last_deal(
                 {
-                    "timestamp_utc": e.timestamp_utc,
+                    "timestamp_utc": e.timestamp_utc.isoformat() if hasattr(e.timestamp_utc, "isoformat") else str(e.timestamp_utc),
                     "symbol": e.symbol,
                     "side": e.side,
                     "volume": e.volume,

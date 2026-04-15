@@ -12,6 +12,14 @@ def _utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _json_default(obj: Any) -> Any:
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    if hasattr(obj, "__str__"):
+        return str(obj)
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
+
 @dataclass
 class RuntimeSnapshot:
     started_at_utc: str
@@ -82,7 +90,7 @@ class RuntimeState:
             "research_workflow": self._research_workflow,
         }
         tmp_path = self._path.with_suffix(f"{self._path.suffix}.tmp")
-        tmp_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        tmp_path.write_text(json.dumps(payload, indent=2, sort_keys=True, default=_json_default), encoding="utf-8")
         tmp_path.replace(self._path)
 
     def set_mode(self, mode: str):
