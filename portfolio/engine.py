@@ -487,8 +487,9 @@ class PortfolioEngine:
             symbol = item["symbol"]
             timeframe = item.get("timeframe") or item["engine"].timeframe
             snapshot = self.broker.get_symbol_snapshot(symbol)
-            if not snapshot.get("ok"):
-                unhealthy_symbols[symbol] = str(snapshot.get("reason") or "symbol_snapshot_failed")
+            reason = snapshot.get("reason")
+            if reason == "symbol_unavailable" or reason == "missing_symbol_info":
+                unhealthy_symbols[symbol] = str(reason)
                 continue
             try:
                 df = self.broker.get_historical_data(symbol=symbol, timeframe=timeframe, bars=startup_bars)
