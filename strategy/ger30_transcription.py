@@ -20,7 +20,7 @@ class GER30TranscriptionStrategy:
 
         cfg = (config or {}).get(mode, {})
         self.mode = mode
-        self.symbol = str(cfg.get("symbol", "GER30m"))
+        self.symbol = str(cfg.get("symbol", "DE30m"))
         self.atr_period = int(cfg.get("atr_period", 14))
         self.rsi_period = int(cfg.get("rsi_period", 14))
         self.min_rr = float(cfg.get("min_rr", cfg.get("rr_target", 1.5)))

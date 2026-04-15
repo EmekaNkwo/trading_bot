@@ -1,6 +1,6 @@
 rotation:
   selected_strategies:
-    GER30m:
+    DE30m:
       - ger30_three_pin_breakout
     BTCUSDm:
       - btc_bos_retest

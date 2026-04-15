@@ -136,7 +136,7 @@ class RuntimeSafetyTests(unittest.TestCase):
         mt5_mock.symbol_info.return_value = Mock(trade_mode=1, point=0.01, trade_tick_size=0.01)
         mt5_mock.symbol_info_tick.return_value = Mock(bid=100.0, ask=101.0)
 
-        executor = MT5Executor("GER30m")
+        executor = MT5Executor("DE30m")
         ok, reason, metrics = executor.market_safety_check({"side": "buy", "sl": 99.0})
 
         self.assertFalse(ok)

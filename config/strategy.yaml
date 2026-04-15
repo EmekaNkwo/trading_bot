@@ -310,7 +310,8 @@ production_safety:
   min_candles_required: 80
   startup_history_bars: 120
   max_candle_age_factor: 3.0
-  max_spread_to_bar_range: 0.35
+  max_spread_to_bar_range: 0.50
+  spread_range_lookback_bars: 12
   max_spread_to_sl_ratio: 0.20
   max_symbol_failures: 3
   symbol_cooldown_minutes: 30
@@ -344,23 +345,23 @@ rotation:
           bars: 5000
           min_trades: 20
         - strategy: xau_opening_range_displacement
-          timeframe: M5
-          candle_seconds: 300
+          timeframe: H1
+          candle_seconds: 3600
           risk: 0.005
-          bars: 5000
-          min_trades: 20
+          bars: 3000
+          min_trades: 15
         - strategy: xau_sweep
-          timeframe: M5
-          candle_seconds: 300
+          timeframe: M30
+          candle_seconds: 1800
           risk: 0.005
-          bars: 5000
+          bars: 4000
           min_trades: 20
         - strategy: xau_regime
-          timeframe: M5
-          candle_seconds: 300
+          timeframe: H1
+          candle_seconds: 3600
           risk: 0.005
-          bars: 5000
-          min_trades: 20
+          bars: 3000
+          min_trades: 15
     US30m:
       top_winners: 2
       candidates:
@@ -376,32 +377,26 @@ rotation:
           risk: 0.001
           bars: 5000
           min_trades: 5
-        - strategy: us30_trend_pullback
-          timeframe: M5
-          candle_seconds: 300
-          risk: 0.001
-          bars: 5000
-          min_trades: 5
         - strategy: us30_supply_demand
-          timeframe: M5
-          candle_seconds: 300
+          timeframe: M30
+          candle_seconds: 1800
           risk: 0.001
-          bars: 5000
+          bars: 4000
           min_trades: 5
         - strategy: us30_fib_retrace
-          timeframe: M5
-          candle_seconds: 300
+          timeframe: H1
+          candle_seconds: 3600
           risk: 0.001
-          bars: 5000
+          bars: 3000
           min_trades: 5
-    GER30m:
+    DE30m:
       top_winners: 1
       candidates:
         - strategy: ger30_three_pin_breakout
-          timeframe: M5
-          candle_seconds: 300
+          timeframe: M30
+          candle_seconds: 1800
           risk: 0.003
-          bars: 5000
+          bars: 4000
           min_trades: 3
     BTCUSDm:
       top_winners: 2

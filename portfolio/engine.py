@@ -498,7 +498,7 @@ class PortfolioEngine:
             if df.empty:
                 unhealthy_symbols[symbol] = "empty_history"
                 continue
-            issue = item["engine"]._validate_market_data(df, df.index[-1])
+            issue = item["engine"]._validate_market_data(df, df.index[-1], skip_staleness=True)
             if issue:
                 unhealthy_symbols[symbol] = issue
                 continue

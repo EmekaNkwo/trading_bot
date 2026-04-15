@@ -1,31 +1,93 @@
 {
   "last_deal": null,
-  "last_error": "STARTUP RECONCILIATION ISSUE | BTCUSDm | unexpected_live_strategy:multi_asset_regime",
+  "last_error": "SIGNAL WORKER ERROR | XAUUSDm | xau_liquidity_reclaim | Symbol not available in MT5: XAUUSDm",
   "last_intent": null,
-  "last_mode_change_utc": "2026-04-11T00:21:54.740463+00:00",
+  "last_mode_change_utc": "2026-04-13T09:31:26.038822+00:00",
   "last_signal": null,
-  "mode": "walkforward",
+  "mode": "live",
   "operator_controls": {
-    "account_brake_clear_nonce": 1,
-    "global_pause": true,
-    "global_pause_reason": "ops",
+    "account_brake_clear_nonce": 0,
+    "global_pause": false,
+    "global_pause_reason": null,
     "killed_symbols": {},
-    "last_account_brake_clear_reason": "checked",
-    "last_account_brake_clear_utc": "2026-04-11T00:06:14.936986+00:00",
-    "updated_at_utc": "2026-04-11T00:06:14.945404+00:00"
+    "last_account_brake_clear_reason": null,
+    "last_account_brake_clear_utc": null,
+    "updated_at_utc": "2026-04-11T00:21:53.696474+00:00"
   },
   "orchestrator_graph": {
     "backtest_allowed": false,
-    "decided_mode": "walkforward",
+    "decided_mode": "live",
     "drawdown_ok": true,
     "engine": "langgraph",
-    "live_allowed": false,
-    "reason": "nightly_walkforward_window",
-    "requested_at_utc": "2026-04-11T00:21:54.728782Z",
+    "live_allowed": true,
+    "reason": "live_allowed",
+    "requested_at_utc": "2026-04-13T09:31:23.283246Z",
     "rotation_allowed": false,
-    "walkforward_allowed": true
+    "walkforward_allowed": false
   },
-  "portfolio_runtime": null,
-  "research_workflow": null,
+  "portfolio_runtime": {
+    "account_guard": {
+      "latched": false,
+      "metrics": {
+        "balance": 9938.83,
+        "bot_positions": 0,
+        "equity": 9938.83,
+        "equity_balance_ratio": 1.0,
+        "free_margin_ratio": 1.0,
+        "margin_free": 9938.83
+      },
+      "reason": null
+    },
+    "broker_reconciliation": {
+      "issues": [],
+      "summary": {},
+      "updated_at_utc": "2026-04-13T09:31:27.488648+00:00"
+    },
+    "manual_kill_symbols": [],
+    "phase": "live_async",
+    "queue_depth": 0,
+    "symbols": {
+      "BTCUSDm": {
+        "disabled_until_utc": "2026-04-13T10:01:27.487136",
+        "failure_count": 0,
+        "last_reason": "startup_health:stale_candle:287487s",
+        "last_success_utc": null,
+        "symbol": "BTCUSDm"
+      },
+      "GER30m": {
+        "disabled_until_utc": "2026-04-13T10:01:27.485622",
+        "failure_count": 0,
+        "last_reason": "startup_health:symbol_unavailable",
+        "last_success_utc": null,
+        "symbol": "GER30m"
+      },
+      "US30m": {
+        "disabled_until_utc": "2026-04-13T10:01:27.482596",
+        "failure_count": 0,
+        "last_reason": "startup_health:stale_candle:319587s",
+        "last_success_utc": null,
+        "symbol": "US30m"
+      },
+      "XAUUSDm": {
+        "disabled_until_utc": "2026-04-13T10:01:42.995041",
+        "failure_count": 0,
+        "last_reason": "signal_worker_exception:Symbol not available in MT5: XAUUSDm",
+        "last_success_utc": "2026-04-13T09:31:27.529118",
+        "symbol": "XAUUSDm"
+      }
+    },
+    "updated_at_utc": "2026-04-13T09:31:52.486433+00:00",
+    "worker_count": 4
+  },
+  "research_workflow": {
+    "action": "walkforward",
+    "engine": "langgraph",
+    "guard_ok": null,
+    "reason": "walkforward_completed",
+    "requested_at_utc": "2026-04-11T00:21:54.745023+00:00",
+    "result": null,
+    "rollback_triggered": false,
+    "status": "completed"
+  },
   "started_at_utc": "2026-04-10T23:53:09.555925+00:00"
 }

@@ -79,7 +79,13 @@ class TradingEngine:
         self.last_runtime_issue = None
         return issue
 
-    def _validate_market_data(self, df: pd.DataFrame, candle_time) -> str | None:
+    def _validate_market_data(
+        self,
+        df: pd.DataFrame,
+        candle_time,
+        *,
+        skip_staleness: bool = False,
+    ) -> str | None:
         min_rows = int(self.safety_cfg.get("min_candles_required", 50) or 50)
         if len(df) < min_rows:
             return f"insufficient_history:{len(df)}<{min_rows}"
@@ -88,28 +94,36 @@ class TradingEngine:
         if df[["open", "high", "low", "close"]].isnull().any().any():
             return "ohlc_contains_nulls"
 
-        max_age_factor = float(self.safety_cfg.get("max_candle_age_factor", 3.0) or 3.0)
-        max_age_s = max(float(self.candle_seconds) * max_age_factor, 300.0)
-        candle_ts = pd.Timestamp(candle_time)
-        if candle_ts.tzinfo is None:
-            candle_ts = candle_ts.tz_localize(timezone.utc)
-        else:
-            candle_ts = candle_ts.tz_convert(timezone.utc)
-        age_s = (pd.Timestamp.now(tz=timezone.utc) - candle_ts).total_seconds()
-        if age_s > max_age_s:
-            return f"stale_candle:{age_s:.0f}s"
+        if not skip_staleness:
+            max_age_factor = float(self.safety_cfg.get("max_candle_age_factor", 3.0) or 3.0)
+            max_age_s = max(float(self.candle_seconds) * max_age_factor, 300.0)
+            candle_ts = pd.Timestamp(candle_time)
+            if candle_ts.tzinfo is None:
+                candle_ts = candle_ts.tz_localize(timezone.utc)
+            else:
+                candle_ts = candle_ts.tz_convert(timezone.utc)
+            age_s = (pd.Timestamp.now(tz=timezone.utc) - candle_ts).total_seconds()
+            if age_s > max_age_s:
+                return f"stale_candle:{age_s:.0f}s"
 
-        last_bar_range = float(df["high"].iloc[-1] - df["low"].iloc[-1])
-        if last_bar_range > 0:
-            try:
-                tick = self.broker.get_symbol_snapshot(self.symbol)
-            except Exception:
-                tick = {"ok": False, "spread": None}
-            if tick.get("ok"):
-                spread = float(tick.get("spread", 0.0) or 0.0)
-                max_spread_to_range = float(self.safety_cfg.get("max_spread_to_bar_range", 0.35) or 0.35)
-                if spread > 0 and spread > (last_bar_range * max_spread_to_range):
-                    return f"spread_too_wide:{spread:.5f}"
+        try:
+            tick = self.broker.get_symbol_snapshot(self.symbol)
+        except Exception:
+            tick = {"ok": False, "spread": None}
+        if tick.get("ok"):
+            spread = float(tick.get("spread", 0.0) or 0.0)
+            if spread > 0:
+                lookback = int(self.safety_cfg.get("spread_range_lookback_bars", 12) or 12)
+                lookback = max(1, min(lookback, len(df)))
+                window = df.tail(lookback)
+                bar_ranges = window["high"] - window["low"]
+                median_range = float(bar_ranges.median())
+                if median_range > 0:
+                    max_spread_to_range = float(
+                        self.safety_cfg.get("max_spread_to_bar_range", 0.50) or 0.50
+                    )
+                    if spread > (median_range * max_spread_to_range):
+                        return f"spread_too_wide:{spread:.5f}"
         return None
 
     def export_runtime_state(self) -> dict:

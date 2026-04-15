@@ -1,0 +1,45 @@
+{
+  "cooldown_state": {
+    "disabled_until": {},
+    "loss_count": {}
+  },
+  "drawdown_state": {
+    "last_account_balance": null,
+    "symbol_equity": {},
+    "symbol_peak": {}
+  },
+  "engine_last_candle": {
+    "XAUUSDm|xau_liquidity_reclaim|M5": "2026-04-13T09:30:00+00:00",
+    "XAUUSDm|xau_opening_range_displacement|M5": "2026-04-13T09:30:00+00:00",
+    "XAUUSDm|xau_regime|M5": "2026-04-13T09:30:00+00:00",
+    "XAUUSDm|xau_sweep|M5": "2026-04-13T09:30:00+00:00"
+  },
+  "health_state": {
+    "BTCUSDm": {
+      "disabled_until_utc": "2026-04-13T10:01:27.487136",
+      "failure_count": 0,
+      "last_reason": "startup_health:stale_candle:287487s",
+      "last_success_utc": null
+    },
+    "GER30m": {
+      "disabled_until_utc": "2026-04-13T10:01:27.485622",
+      "failure_count": 0,
+      "last_reason": "startup_health:symbol_unavailable",
+      "last_success_utc": null
+    },
+    "US30m": {
+      "disabled_until_utc": "2026-04-13T10:01:27.482596",
+      "failure_count": 0,
+      "last_reason": "startup_health:stale_candle:319587s",
+      "last_success_utc": null
+    },
+    "XAUUSDm": {
+      "disabled_until_utc": "2026-04-13T10:01:42.995041",
+      "failure_count": 0,
+      "last_reason": "signal_worker_exception:Symbol not available in MT5: XAUUSDm",
+      "last_success_utc": "2026-04-13T09:31:27.529118"
+    }
+  },
+  "last_trade_result": {},
+  "updated_at_utc": "2026-04-13T09:31:42.996562"
+}

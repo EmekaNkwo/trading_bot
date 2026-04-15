@@ -33,7 +33,7 @@ class StrategySmokeTests(unittest.TestCase):
     def test_rotated_winners_are_pinned(self) -> None:
         rotation_cfg = self.config.get("rotation", {})
         self.assertEqual(
-            rotation_cfg.get("selected_strategies", {}).get("GER30m"),
+            rotation_cfg.get("selected_strategies", {}).get("DE30m"),
             ["ger30_three_pin_breakout"],
         )
         self.assertCountEqual(
@@ -42,7 +42,7 @@ class StrategySmokeTests(unittest.TestCase):
         )
 
     def test_surviving_custom_strategies_build(self) -> None:
-        ger = build_strategy("ger30_three_pin_breakout", self.config, symbol="GER30m")
+        ger = build_strategy("ger30_three_pin_breakout", self.config, symbol="DE30m")
         btc = build_strategy("btc_bos_retest", self.config, symbol="BTCUSDm")
         regime = build_strategy("multi_asset_regime", self.config, symbol="BTCUSDm")
 
@@ -51,7 +51,7 @@ class StrategySmokeTests(unittest.TestCase):
         self.assertEqual(type(regime).__name__, "MultiAssetRegimeStrategy")
 
     def test_surviving_custom_strategies_handle_candles(self) -> None:
-        ger = build_strategy("ger30_three_pin_breakout", self.config, symbol="GER30m")
+        ger = build_strategy("ger30_three_pin_breakout", self.config, symbol="DE30m")
         btc = build_strategy("btc_bos_retest", self.config, symbol="BTCUSDm")
         regime = build_strategy("multi_asset_regime", self.config, symbol="BTCUSDm")
 
