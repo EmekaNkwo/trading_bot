@@ -968,10 +968,12 @@ class MT5Executor:
         if raw_lot < min_lot:
             implied_risk = float(min_lot) * float(actual_sl_ticks) * float(tick_value)
             implied_mult = (implied_risk / float(risk_amount)) if float(risk_amount) > 0 else 9999.0
-            try:
-                max_mult = float(os.getenv("MIN_LOT_RISK_MULT_MAX", "3.5"))
-            except Exception:
-                max_mult = 2.0
+            max_mult = float(self.safety_cfg.get("max_lot_risk_multiplier", 0) or 0)
+            if max_mult <= 0:
+                try:
+                    max_mult = float(os.getenv("MIN_LOT_RISK_MULT_MAX", "3.5"))
+                except Exception:
+                    max_mult = 3.5
             max_mult = max(1.0, min(10.0, max_mult))
 
             if implied_mult > max_mult:

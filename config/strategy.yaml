@@ -306,6 +306,15 @@ breakeven:
   # Extra safety: require at least this move (in points) before breakeven
   min_move_points: 30
 
+small_account:
+  enabled: true
+  threshold_balance: 500
+  max_total_risk: 0.02
+  max_open_bot_positions: 3
+  block_new_entries_with_open_bot_position: true
+  max_lot_risk_multiplier: 2.0
+  min_equity_balance_ratio: 0.92
+
 production_safety:
   min_candles_required: 80
   startup_history_bars: 120

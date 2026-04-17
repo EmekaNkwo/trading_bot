@@ -75,6 +75,10 @@ config/secrets.yaml
 .env.*
 !.env.example
 
+# Runtime state (generated at runtime, not source)
+state/*.json
+optimizer/rotation_state.json
+
 # Cache and temp
 .cache/
 *.tmp

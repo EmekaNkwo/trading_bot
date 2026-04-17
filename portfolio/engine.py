@@ -92,6 +92,8 @@ class PortfolioEngine:
             max_failures=int(self.safety_cfg.get("max_symbol_failures", 3) or 3),
             cooldown_minutes=int(self.safety_cfg.get("symbol_cooldown_minutes", 30) or 30),
         )
+        self._small_account_active = False
+        self._apply_small_account_mode(config)
         self.market_state = MarketStateStore(config)
         rotation_cfg = config.get("rotation", {}) or {}
         self.selected_strategies = dict(rotation_cfg.get("selected_strategies", {}) or {})
@@ -201,8 +203,65 @@ class PortfolioEngine:
                     f"(risk: {effective_cfg['risk']}, tf: {effective_cfg['timeframe']})"
                 )
 
+        if self._small_account_active:
+            for item in self.engines:
+                item["engine"].executor.safety_cfg.update(self.safety_cfg)
+
         self._restore_runtime_state()
         self.logger.info(f"Portfolio initialized with {len(self.engines)} engines")
+
+    def _apply_small_account_mode(self, config: dict) -> None:
+        sa_cfg = dict(config.get("small_account", {}) or {})
+        if not sa_cfg.get("enabled", False):
+            return
+
+        try:
+            threshold = float(sa_cfg.get("threshold_balance", 500) or 500)
+        except Exception:
+            threshold = 500.0
+
+        account = mt5.account_info()
+        if not account:
+            self.logger.warning("SMALL ACCOUNT CHECK | cannot read account info, skipping")
+            return
+
+        balance = float(getattr(account, "balance", 0.0) or 0.0)
+        if balance <= 0 or balance >= threshold:
+            self.logger.info(
+                f"SMALL ACCOUNT CHECK | balance=${balance:.2f} >= threshold=${threshold:.2f}, normal mode"
+            )
+            return
+
+        self._small_account_active = True
+        self.logger.info(
+            f"SMALL ACCOUNT MODE ACTIVE | balance=${balance:.2f} < threshold=${threshold:.2f}"
+        )
+
+        if "max_total_risk" in sa_cfg:
+            new_risk = float(sa_cfg["max_total_risk"])
+            self.allocator = CapitalAllocator(new_risk)
+            self.logger.info(f"  max_total_risk overridden: {self.cfg['max_total_risk']} -> {new_risk}")
+
+        if "max_open_bot_positions" in sa_cfg:
+            self.safety_cfg["max_open_bot_positions"] = int(sa_cfg["max_open_bot_positions"])
+            self.logger.info(f"  max_open_bot_positions -> {sa_cfg['max_open_bot_positions']}")
+
+        if "block_new_entries_with_open_bot_position" in sa_cfg:
+            self.safety_cfg["block_new_entries_with_open_bot_position"] = bool(
+                sa_cfg["block_new_entries_with_open_bot_position"]
+            )
+            self.logger.info(
+                f"  block_new_entries_with_open_bot_position -> "
+                f"{sa_cfg['block_new_entries_with_open_bot_position']}"
+            )
+
+        if "max_lot_risk_multiplier" in sa_cfg:
+            self.safety_cfg["max_lot_risk_multiplier"] = float(sa_cfg["max_lot_risk_multiplier"])
+            self.logger.info(f"  max_lot_risk_multiplier -> {sa_cfg['max_lot_risk_multiplier']}")
+
+        if "min_equity_balance_ratio" in sa_cfg:
+            self.safety_cfg["min_equity_balance_ratio"] = float(sa_cfg["min_equity_balance_ratio"])
+            self.logger.info(f"  min_equity_balance_ratio -> {sa_cfg['min_equity_balance_ratio']}")
 
     def _selected_strategy_names(self, symbol: str) -> list[str]:
         selected = self.selected_strategies.get(symbol)
@@ -545,6 +604,7 @@ class PortfolioEngine:
                     for symbol in sorted({item["symbol"] for item in self.engines})
                 },
                 "manual_kill_symbols": sorted(self._effective_kill_symbols()),
+                "small_account_mode": self._small_account_active,
                 "account_guard": dict(self._account_guard_state),
                 "broker_reconciliation": dict(self._broker_reconciliation),
                 "updated_at_utc": datetime.now(timezone.utc).isoformat(),
