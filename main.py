@@ -30,7 +30,7 @@ from research.parameter_rotation import (
     save_best_rotation,
 )
 from research.workflow_graph import ResearchWorkflowGraph
-from reports.performance import daily_summary
+from reports.performance import daily_summary, format_daily_report
 
 from strategy.xau_trend import XAUTrendStrategy
 from strategy.factory import build_strategy
@@ -348,14 +348,9 @@ def run_portfolio_live(orchestrator):
 def run_reporting_module():
     summary = daily_summary()
     if summary:
-        notifier.send(
-            "DAILY PERFORMANCE SUMMARY\n"
-            f"Date: {summary['date']}\n"
-            f"Trades: {summary['trades']}\n"
-            f"Wins: {summary['wins']}\n"
-            f"Losses: {summary['losses']}"
-        )
-        logger.info(f"DAILY REPORT SENT | {summary}")
+        report_text = format_daily_report(summary)
+        notifier.send(report_text)
+        logger.info(f"DAILY REPORT SENT | trades={summary['trades']} net_pnl={summary['net_pnl']}")
     else:
         logger.info("DAILY REPORT SKIPPED | no trades for today")
     return summary
