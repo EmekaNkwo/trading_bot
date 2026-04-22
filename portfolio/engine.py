@@ -28,6 +28,7 @@ from utils.operator_controls import CONTROLS
 from utils.deal_tracker import ClosedDealTracker
 from utils.trade_reporter import ClosedDealReporter
 from utils.runtime_state import STATE
+from utils.news_filter import NewsFilter
 
 
 class PortfolioEngine:
@@ -75,6 +76,7 @@ class PortfolioEngine:
         risk_cfg = config.get("risk", {})
         self.breakeven_cfg = config.get("breakeven", {}) or {}
         self.safety_cfg = dict(config.get("production_safety", {}) or {})
+        self.news_filter = NewsFilter(config.get("news_filter", {}))
         self.static_kill_symbols = {
             str(symbol)
             for symbol in self.safety_cfg.get("symbol_kill_switches", []) or []
@@ -529,6 +531,11 @@ class PortfolioEngine:
         ) > 0:
             return "open_bot_position_exists"
 
+        news_blocked, news_reason = self.news_filter.is_blocked(symbol)
+        if news_blocked:
+            self.logger.info(f"ENTRY BLOCKED | {symbol} | {news_reason}")
+            return news_reason
+
         return None
 
     def _quarantine_symbol(self, symbol: str, reason: str) -> None:
@@ -605,6 +612,7 @@ class PortfolioEngine:
                 },
                 "manual_kill_symbols": sorted(self._effective_kill_symbols()),
                 "small_account_mode": self._small_account_active,
+                "news_filter": self.news_filter.status_summary(),
                 "account_guard": dict(self._account_guard_state),
                 "broker_reconciliation": dict(self._broker_reconciliation),
                 "updated_at_utc": datetime.now(timezone.utc).isoformat(),

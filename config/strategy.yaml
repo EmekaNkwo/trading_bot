@@ -306,6 +306,14 @@ breakeven:
   # Extra safety: require at least this move (in points) before breakeven
   min_move_points: 30
 
+news_filter:
+  enabled: true
+  blackout_minutes_before: 15
+  blackout_minutes_after: 10
+  min_impact: high
+  poll_interval_seconds: 3600
+  fmp_api_key: ""
+
 small_account:
   enabled: true
   threshold_balance: 500
